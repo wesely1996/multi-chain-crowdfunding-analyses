@@ -1,0 +1,23 @@
+{
+  "name": "crowdfunding-solana",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "anchor build",
+    "test": "anchor test",
+    "deploy": "bash deploy.sh"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.1.8",
+    "@solana/web3.js": "^1.95.4"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.7",
+    "chai": "^4.5.0",
+    "mocha": "^11.3.0",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^5.4.5"
+  }
+}
