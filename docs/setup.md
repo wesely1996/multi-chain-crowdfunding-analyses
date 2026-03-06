@@ -36,12 +36,65 @@ npx hardhat run scripts/deploy.ts
 Deploys `MockERC20`, `CrowdfundingFactory`, and one sample campaign.
 Prints a deployment summary table including all contract addresses.
 
-### Deploy (external network)
+### Deploy (external network — Sepolia)
 
-Add a network entry to `hardhat.config.ts` and set `PRIVATE_KEY` + RPC URL as environment variables, then:
+#### 1. Create a MetaMask wallet
+
+> Create a **dedicated test wallet** — never use your main/personal wallet for deployment.
+
+1. Install the MetaMask browser extension from [metamask.io](https://metamask.io)
+2. Click **Create a new wallet** and set a password
+3. **Save the 12-word Secret Recovery Phrase** in a password manager — this is the only way to recover the wallet
+4. Click the account circle (top-right) → **Add account or hardware wallet** → **Add a new Ethereum account**
+   - Name it something like `Thesis Deployer` to keep it separate
+5. Switch MetaMask to the **Sepolia** test network:
+   - Click the network dropdown (top-left, shows "Ethereum Mainnet" by default)
+   - Enable **Show test networks** if Sepolia is not listed
+   - Select **Sepolia**
+6. Get free Sepolia ETH from a faucet:
+   - [sepoliafaucet.com](https://sepoliafaucet.com) — paste your wallet address and request ETH
+   - Or use the Alchemy faucet (available after creating an Alchemy account below)
+
+#### 2. Get a Sepolia RPC URL (Alchemy)
+
+1. Go to [alchemy.com](https://alchemy.com) and click **Sign up**
+2. Complete email verification and fill in the onboarding form (select **Ethereum** as your chain of interest)
+3. From the dashboard click **+ Create new app**
+   - Name: anything (e.g. `thesis-sepolia`)
+   - Chain: **Ethereum**
+   - Network: **Ethereum Sepolia**
+   - Click **Create app**
+4. Open the newly created app → click **API Key** (top-right of the app card)
+5. Copy the **HTTPS** endpoint — it looks like:
+   ```
+   https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+   ```
+
+#### 3. Export your deployer private key (MetaMask)
+
+1. Open MetaMask and switch to the `Thesis Deployer` account
+2. Click the three-dot menu (⋮) next to the account name → **Account details**
+3. Click **Show private key** → enter your MetaMask password → copy the key
+
+> The private key starts with `0x` followed by 64 hex characters.
+> Never share it or commit it to version control.
+
+#### 4. Configure environment variables
 
 ```bash
-npx hardhat run scripts/deploy.ts --network <network-name>
+cd contracts/evm
+cp .env.example .env
+# edit .env and paste your values:
+#   PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+#   SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+```
+
+> `.env` is gitignored — it will never be committed.
+
+#### 5. Deploy
+
+```bash
+npx hardhat run scripts/deploy.ts --network sepolia
 ```
 
 ### Gas benchmark
