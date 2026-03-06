@@ -4,12 +4,63 @@
 
 All EVM work runs natively on Windows via Node.js.
 
+### Install and compile
+
 ```bash
 cd contracts/evm
 npm install
-npx hardhat compile   # "Nothing to compile" is OK until contracts/ has .sol files
-npx hardhat test
+npx hardhat compile
 ```
+
+Expected output:
+```
+Compiled 7 Solidity files successfully (evm target: paris)
+```
+
+### Run tests
+
+```bash
+npx hardhat test
+# or run a single test file:
+npx hardhat test test/CrowdfundingCampaign.test.ts
+```
+
+Tests use an in-process Hardhat network — no external node required.
+
+### Deploy (local Hardhat network)
+
+```bash
+npx hardhat run scripts/deploy.ts
+```
+
+Deploys `MockERC20`, `CrowdfundingFactory`, and one sample campaign.
+Prints a deployment summary table including all contract addresses.
+
+### Deploy (external network)
+
+Add a network entry to `hardhat.config.ts` and set `PRIVATE_KEY` + RPC URL as environment variables, then:
+
+```bash
+npx hardhat run scripts/deploy.ts --network <network-name>
+```
+
+### Gas benchmark
+
+```bash
+npx hardhat run scripts/benchmark.ts
+```
+
+Runs a full 50-contributor sequential scenario on the in-process Hardhat network:
+1. Deploys `MockERC20` + `CrowdfundingFactory` + one campaign (hardCap = 500 USDC, milestones [30%, 30%, 40%])
+2. Mints and contributes 10 USDC from each of 50 signers (records `gasUsed` per tx)
+3. Advances block time past the deadline (`evm_increaseTime`)
+4. Calls `finalize()` (records gas)
+5. Calls `withdrawMilestone()` × 3 (records gas each)
+6. Prints avg / min / max gas table
+
+The Hardhat network is pre-configured with 60 accounts (1 deployer + 59 contributors) in `hardhat.config.ts`.
+
+Record benchmark output in `docs/measurements.md` for the thesis gas comparison table.
 
 ## Solana (WSL required on Windows)
 
