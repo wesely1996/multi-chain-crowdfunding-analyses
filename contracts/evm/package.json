@@ -9,8 +9,8 @@
     "benchmark": "ts-node scripts/benchmark.ts"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
-    "hardhat": "^3.1.10",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },
