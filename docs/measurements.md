@@ -115,18 +115,128 @@ from the previous transaction's access list. [assumption]
 
 ## V4 — Solana / SPL + Token-2022
 
+### M-V4-1 · Localnet (solana-test-validator) — Fee & Latency Benchmark
+
+**Date:** 2026-03-07
+**Environment:** `solana-test-validator` (local, `--reset`; Unix socket from WSL `~` home)
+**Anchor version:** `@coral-xyz/anchor` 0.32.1
+**Solana web3.js:** `@solana/web3.js` 1.95.4
+**SPL Token:** `@solana/spl-token` 0.3.11
+**Script:** `contracts/solana/scripts/benchmark.ts`
+
+#### Scenario Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Payment token | SPL mint (6 decimals, localnet) |
+| Contribution per contributor | 10 USDC-equivalent (10,000,000 raw units) |
+| `soft_cap` | 100 USDC-equivalent |
+| `hard_cap` | 500 USDC-equivalent |
+| Milestone schedule | [30%, 30%, 40%] |
+| Contributors (`N`) | 50 (sequential, distinct keypairs) |
+| Deadline | 5-second fast campaign (finalize/withdraw sub-benchmark) |
+| Priority fees | None set (base fee only) |
+
+#### 4.1 `fund()` — Sequential Fee & Latency (N = 50)
+
+| Metric | Lamports | SOL |
+|--------|----------:|----:|
+| Fee avg | 10,000 | 0.000010000 |
+| Fee min | 10,000 | 0.000010000 |
+| Fee max | 10,000 | 0.000010000 |
+| Latency avg (ms) | — | 409 |
+| Latency min (ms) | — | 315 |
+| Latency max (ms) | — | 497 |
+
+**Observation — flat fee model [fact]:**
+Solana charges a base fee of 5,000 lamports per signature. The `fund()` instruction requires
+two signers (payer + contributor), yielding a deterministic 10,000 lamports per transaction
+regardless of instruction complexity. There is no analogue to EVM gas units; computational
+cost is measured separately in Compute Units (CUs) and capped at 200,000 CU/instruction by
+default. CU consumption was not recorded in this benchmark run and should be added in a
+follow-up using `ComputeBudgetProgram.setComputeUnitLimit`.
+
+**Observation — latency spread [assumption]:**
+The 315–497 ms range on localnet reflects round-trip RPC latency to the local validator
+plus slot-confirmation time (localnet slots advance at ~400 ms). The spread is not caused by
+fee variability (fees are flat) but by slot-boundary timing: a transaction landing early in
+a slot confirms faster than one submitted just after a slot boundary. This variance is
+expected to be higher on devnet (variable congestion) and should be re-measured there.
+
+#### 4.2 `finalize_campaign()` — Fee & Latency
+
+| Metric | Lamports | SOL | Time (ms) |
+|--------|----------:|----:|----------:|
+| Fee | 5,000 | 0.000005000 | 306 |
+
+**Observation:** `finalize_campaign()` has a single signer (the caller), hence the base fee
+is 5,000 lamports (one signature). This is the only instruction in the benchmark that costs
+half the contribution fee, consistent with the single-signer design in the Anchor program.
+
+#### 4.3 `withdraw_milestone()` — Per-Milestone Fee & Latency
+
+| Index | Allocation | Fee (lamports) | SOL | Time (ms) |
+|------:|----------:|---------------:|----:|----------:|
+| 0 | 30 % | 10,000 | 0.000010000 | 479 |
+| 1 | 30 % | 10,000 | 0.000010000 | 340 |
+| 2 | 40 % | 10,000 | 0.000010000 | 451 |
+
+**Observation — uniform fee, variable latency [fact]:**
+Unlike EVM `withdrawMilestone()`, which showed a strong descending gas cost pattern driven
+by cold-to-warm SSTORE transitions, Solana fees are slot-count-independent: all three
+milestone withdrawals cost exactly 10,000 lamports (two signers: creator + program).
+The latency variation (340–479 ms) is attributable to slot-boundary timing, not instruction
+complexity. The absence of a cost gradient across milestones is a structurally significant
+cross-chain difference: Solana's account model pre-allocates storage at account creation
+(rent-exempt deposit), so there is no zero-to-nonzero write penalty at instruction time.
+
+#### 4.4 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time | 20,738 ms |
+| Throughput (TPS) | 2.41 |
+
+**Observation — sequential throughput [note]:**
+The 2.41 TPS figure reflects a worst-case sequential benchmark: each contribution is
+submitted and confirmed before the next is issued. Localnet slot time (~400 ms) is the
+dominant factor; on devnet the per-transaction latency is typically higher (500–1,500 ms)
+but the sequential TPS methodology is identical to the EVM benchmark for controlled
+comparison. Parallel submission (e.g. pipelining without confirmation) would yield
+substantially higher throughput but is out of scope for this controlled comparison.
+
+---
+
+### M-V4-2 · Devnet — Fee & Latency Benchmark
+
 > **Status: pending.**
-> Anchor program implementation is in progress. Measurements will be recorded here after the
-> first successful `anchor test` run on localnet and devnet.
-> Expected metrics: compute units per instruction, lamport fee per transaction,
-> finality time (slot confirmation), and throughput (TPS over 50 sequential contributions).
+> Expected additional columns: `slot confirmation latency (s)`, `prioritization fee (lamports)`,
+> `cost (USD at time of measurement)`, `CU consumed per instruction`.
 
 ---
 
 ## Cross-Chain Comparison Table
 
-> **Status: pending** — will be populated once both V1 (Sepolia) and V4 (devnet) baselines
-> are available.
+> **Localnet baseline** — USD costs require testnet runs with known gas/SOL prices at time of
+> measurement. Fiat columns will be populated in M-V1-2 (Sepolia) and M-V4-2 (devnet).
+> EVM latency was not recorded in M-V1-1 (gas-only run); devnet latency for V4 is pending.
+
+### Raw-unit comparison (localnet)
+
+| Metric | V1 EVM / Hardhat localnet | V4 Solana / localnet |
+|--------|--------------------------|---------------------|
+| `contribute()` avg cost | 103,257 gas | 10,000 lamports (0.00001 SOL) |
+| `contribute()` cost spread (min→max) | 102,231 → 153,531 gas | 10,000 → 10,000 lamports (flat) |
+| `finalize()` cost | 47,050 gas | 5,000 lamports (0.000005 SOL) |
+| `withdrawMilestone()` — index 0 | 93,125 gas | 10,000 lamports |
+| `withdrawMilestone()` — index 1 | 58,975 gas | 10,000 lamports |
+| `withdrawMilestone()` — index 2 | 50,459 gas | 10,000 lamports |
+| `contribute()` avg latency (ms) | — (not recorded) | 409 |
+| Throughput — 50 contributions total (ms) | — (not recorded) | 20,738 |
+| Throughput (TPS) | — (not recorded) | 2.41 |
+
+### Fiat-cost comparison (testnet) — pending
 
 | Metric | V1 EVM / Sepolia | V4 Solana / devnet |
 |--------|-----------------|-------------------|
@@ -165,3 +275,18 @@ from the previous transaction's access list. [assumption]
    runs. This setting optimizes for execution cost over deployment cost and is the standard
    choice for contracts expected to be called frequently. Deployment gas costs are not
    reported in this benchmark run but should be recorded for the testnet comparison.
+
+5. **Solana fee model.** Solana charges a base fee of 5,000 lamports per signature per
+   transaction. Instructions with two signers (e.g. `fund`, `withdraw_milestone`) cost
+   10,000 lamports; instructions with one signer (e.g. `finalize_campaign`) cost 5,000
+   lamports. There is no per-instruction gas metering analogous to EVM gas units. Compute
+   Unit (CU) consumption is a separate resource limit (default 200,000 CU/instruction) and
+   was not recorded in this benchmark run. Priority fees (`ComputeBudgetProgram`) were not
+   set, so all fees represent the minimum base cost. CU consumption and priority-fee
+   sensitivity should be measured in the devnet run.
+
+6. **Solana rent-exempt deposits.** Account creation on Solana requires a one-time
+   rent-exempt SOL deposit (e.g. ~0.002 SOL for a 128-byte PDA account). These deposits
+   are not transaction fees and are recoverable on account closure. They are excluded from
+   the per-instruction fee figures above but should be reported as part of the total
+   deployment cost in the devnet comparison.

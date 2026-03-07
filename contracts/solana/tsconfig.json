@@ -9,6 +9,6 @@
     "skipLibCheck": true,
     "types": ["mocha", "chai", "node"]
   },
-  "include": ["tests/**/*.ts"],
+  "include": ["tests/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules"]
 }
