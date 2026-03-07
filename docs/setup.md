@@ -13,6 +13,7 @@ npx hardhat compile
 ```
 
 Expected output:
+
 ```
 Compiled 7 Solidity files successfully (evm target: paris)
 ```
@@ -52,20 +53,23 @@ Prints a deployment summary table including all contract addresses.
    - Enable **Show test networks** if Sepolia is not listed
    - Select **Sepolia**
 6. Get free Sepolia ETH from a faucet:
-   - [sepoliafaucet.com](https://sepoliafaucet.com) — paste your wallet address and request ETH
-   - Or use the Alchemy faucet (available after creating an Alchemy account below)
+   - [Google Sepolia Faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia) — no mainnet ETH required; paste your deployer address, select Sepolia, and request
+   - [Alchemy Sepolia Faucet](https://www.alchemy.com/faucets/ethereum-sepolia) — requires ≥ 0.001 ETH on Ethereum mainnet to claim
 
 #### 2. Get a Sepolia RPC URL (Alchemy)
 
 1. Go to [alchemy.com](https://alchemy.com) and click **Sign up**
-2. Complete email verification and fill in the onboarding form (select **Ethereum** as your chain of interest)
+2. Complete email verification and fill in the onboarding form:
+   - **What are you building?** → select **Infra & Tooling**
+   - **What chains are you building on?** → select **Ethereum** and **Solana**
 3. From the dashboard click **+ Create new app**
    - Name: anything (e.g. `thesis-sepolia`)
    - Chain: **Ethereum**
-   - Network: **Ethereum Sepolia**
+   - Services to enable: **Node API**, **Websockets**, **Transaction Receipts API**, **Debug API**, **Trace API**, **Block Timestamp API**
    - Click **Create app**
-4. Open the newly created app → click **API Key** (top-right of the app card)
-5. Copy the **HTTPS** endpoint — it looks like:
+4. Set network: **Ethereum Sepolia**
+5. Open the newly created app → click **API Key** (top-right of the app card)
+6. Copy the **HTTPS** endpoint — it looks like:
    ```
    https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
    ```
@@ -104,6 +108,7 @@ npx hardhat run scripts/benchmark.ts
 ```
 
 Runs a full 50-contributor sequential scenario on the in-process Hardhat network:
+
 1. Deploys `MockERC20` + `CrowdfundingFactory` + one campaign (hardCap = 500 USDC, milestones [30%, 30%, 40%])
 2. Mints and contributes 10 USDC from each of 50 signers (records `gasUsed` per tx)
 3. Advances block time past the deadline (`evm_increaseTime`)
@@ -166,6 +171,7 @@ anchor test           # spins up localnet validator + runs TS tests
 ```
 
 Expected output for a clean run:
+
 ```
 1 passing (267ms)
 ```
@@ -174,6 +180,7 @@ Expected output for a clean run:
 > connected momentarily before the validator WebSocket was ready. It does not affect results.
 
 > **If port 8899 is already in use** (leftover validator from a previous run):
+>
 > ```bash
 > pkill -f solana-test-validator
 > ```
@@ -191,8 +198,8 @@ Expected output for a clean run:
 
 ## Local Development Keys
 
-| Purpose | Public Key |
-|---------|------------|
+| Purpose                         | Public Key                                     |
+| ------------------------------- | ---------------------------------------------- |
 | Solana localnet wallet (veseli) | `J6qwPsQw3fkP6t4axc7tijndhSq1NqNpWACRBME4f3xn` |
 
 > Keypair file: `/home/veseli/.config/solana/id.json` (WSL only — never commit this file).
@@ -200,15 +207,15 @@ Expected output for a clean run:
 
 ## Version Matrix (tested baseline)
 
-| Tool | Version |
-|------|---------|
-| Node.js | 20.x LTS |
-| TypeScript | 5.4.x |
-| Hardhat | 2.22.x |
-| @openzeppelin/contracts | 5.1.x |
-| Solidity | 0.8.20 |
-| Rust | stable (1.84+) |
-| Solana CLI | 3.0.15 (stable) |
-| Anchor CLI | 0.32.1 |
-| anchor-lang | 0.32.1 |
-| anchor-spl | 0.32.1 |
+| Tool                    | Version         |
+| ----------------------- | --------------- |
+| Node.js                 | 20.x LTS        |
+| TypeScript              | 5.4.x           |
+| Hardhat                 | 2.22.x          |
+| @openzeppelin/contracts | 5.1.x           |
+| Solidity                | 0.8.20          |
+| Rust                    | stable (1.84+)  |
+| Solana CLI              | 3.0.15 (stable) |
+| Anchor CLI              | 0.32.1          |
+| anchor-lang             | 0.32.1          |
+| anchor-spl              | 0.32.1          |
