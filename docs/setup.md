@@ -125,6 +125,51 @@ Record benchmark output in `docs/measurements.md` for the thesis gas comparison 
 The Solana/Anchor toolchain does **not** support native Windows.
 Use WSL 2 (Ubuntu 22.04 recommended).
 
+### Install WSL on Windows
+
+Open **PowerShell as Administrator** (right-click the Start button → **Terminal (Admin)**) and run:
+
+```powershell
+wsl --install
+```
+
+This installs WSL 2 and Ubuntu 22.04 LTS in one step. Reboot when prompted.
+
+On first launch Ubuntu asks you to create a Unix username and password — these are independent of your Windows credentials.
+
+> If `wsl --install` reports that WSL is already installed but no distro is present, install Ubuntu explicitly:
+>
+> ```powershell
+> wsl --install -d Ubuntu-22.04
+> ```
+>
+> To verify WSL 2 is active after reboot:
+>
+> ```powershell
+> wsl --list --verbose
+> # NAME            STATE    VERSION
+> # Ubuntu-22.04    Running  2       ← VERSION must be 2
+> ```
+>
+> If it shows VERSION 1, upgrade with: `wsl --set-version Ubuntu-22.04 2`
+
+### Open WSL
+
+Three equivalent ways to open a WSL terminal:
+
+| Method               | Steps                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Windows Terminal** | Open Windows Terminal → click the **˅** dropdown next to the `+` tab → select **Ubuntu-22.04**                |
+| **Start menu**       | Search for **Ubuntu** → click the Ubuntu 22.04 app                                                            |
+| **Run dialog**       | Press `Win + R` → type `wsl` → press Enter                                                                    |
+| **PowerShell**       | Open PowerShell and run `wsl` (opens the default distro) or `wsl -d Ubuntu-22.04` to target a specific distro |
+
+All subsequent Solana/Anchor commands in this guide must be run inside the WSL terminal.
+
+> **Accessing Windows files from WSL:** your Windows drives are mounted under `/mnt/`.
+> The repo is typically at `/mnt/c/Users/<your-name>/...`.
+> Clone or work with the repo from inside WSL's home directory (`~/`) for best filesystem performance.
+
 ### One-time WSL setup
 
 ```bash
@@ -173,11 +218,90 @@ anchor test           # spins up localnet validator + runs TS tests
 Expected output for a clean run:
 
 ```
-1 passing (267ms)
+crowdfunding
+  1. initialize_campaign with valid params creates campaign account
+  2. contribute increases vault balance and mints receipt tokens
+  3. contribute after deadline fails with DeadlinePassed
+  4. contribute exceeding hardCap fails with HardCapExceeded
+  5. finalize sets successful = true when total_raised >= softCap
+  6. finalize sets successful = false when total_raised < softCap
+  7. withdraw_milestone transfers tokens to creator and advances milestone
+  8. refund returns payment tokens and burns receipt tokens
+  9. refund on a successful campaign fails with NotFailed
+
+9 passing (~15s)
 ```
 
 > A `websocket error` line printed before the test results is harmless — the test client
 > connected momentarily before the validator WebSocket was ready. It does not affect results.
+>
+> Tests 3, 5, and 6 each initialize a campaign with a 2-second deadline and call
+> `await sleep(3000)` to let it expire before finalizing. The total suite takes ~15 seconds.
+
+### Benchmark (N=50 sequential contributions)
+
+The benchmark is a standalone script that must run against a live localnet validator
+with the program already deployed. It does **not** use `anchor test`'s embedded validator.
+
+```bash
+# Terminal 1 — start a persistent localnet validator
+cd ~
+solana-test-validator --reset
+
+# Terminal 2 — build, deploy, then run the benchmark
+cd contracts/solana
+anchor build
+anchor deploy
+npm run benchmark
+```
+
+Verified output (localnet, 2026-03-07):
+
+```
+========================================================================
+Solana Crowdfunding Benchmark
+Network : http://127.0.0.1:8899
+N       : 50 sequential contributions
+========================================================================
+Setting up payment mint and contributors... done
+Campaign : 8XwC4C7et1Eupz696zPErXeqbcPGRdjppUmBXbD61Q7L
+Pre-creating receipt ATAs... done
+
+Running 50 sequential contribute() calls...
+  10 / 50
+  20 / 50
+  30 / 50
+  40 / 50
+  50 / 50
+
+Setting up finalize / withdraw benchmark campaign (5-second deadline)...
+
+========================================================================
+Results
+========================================================================
+  contribute() [N=50]       fee avg/min/max (lamports):  10000 / 10000 / 10000   time avg/min/max (ms):   409 /  315 /  497
+  finalize()                fee avg/min/max (lamports):   5000 /  5000 /  5000   time avg/min/max (ms):   306 /  306 /  306
+  withdrawMilestone[0]      fee avg/min/max (lamports):  10000 / 10000 / 10000   time avg/min/max (ms):   479 /  479 /  479
+  withdrawMilestone[1]      fee avg/min/max (lamports):  10000 / 10000 / 10000   time avg/min/max (ms):   340 /  340 /  340
+  withdrawMilestone[2]      fee avg/min/max (lamports):  10000 / 10000 / 10000   time avg/min/max (ms):   451 /  451 /  451
+
+  Throughput : 50 contributions in 20738 ms → 2.41 TPS
+
+Fee note: Solana base fee = 5 000 lamports / signature (flat).
+  0.000010000 SOL avg per contribute().
+  (No gas-price equivalent; priority fees not set in this benchmark.)
+========================================================================
+```
+
+> **Fee structure:** 5 000 lamports per signature. Transactions with two signers
+> (contributor + fee-payer wallet, or creator + fee-payer wallet) cost 10 000 lamports.
+> `finalize()` uses only the fee-payer as signer → 5 000 lamports.
+> Fees are completely flat — no cold/warm storage spread, no analogue to EVM gas pricing.
+>
+> **TPS:** 2.41 sequential on localnet. Bounded by slot confirmation time (~400 ms/slot),
+> not by compute — parallel submissions would be significantly higher.
+>
+> Record results in `docs/measurements.md` section M-V4 for the thesis comparison table.
 
 > **If port 8899 is already in use** (leftover validator from a previous run):
 >
@@ -219,3 +343,4 @@ Expected output for a clean run:
 | Anchor CLI              | 0.32.1          |
 | anchor-lang             | 0.32.1          |
 | anchor-spl              | 0.32.1          |
+| @solana/spl-token (TS)  | 0.3.11          |
