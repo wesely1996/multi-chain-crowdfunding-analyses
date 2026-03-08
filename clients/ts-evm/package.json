@@ -1,0 +1,22 @@
+{
+  "name": "ts-evm-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "create-campaign": "tsx src/create-campaign.ts",
+    "contribute": "tsx src/contribute.ts",
+    "finalize": "tsx src/finalize.ts",
+    "withdraw": "tsx src/withdraw.ts",
+    "refund": "tsx src/refund.ts",
+    "status": "tsx src/status.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.5"
+  }
+}
