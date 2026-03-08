@@ -10,6 +10,9 @@
   <ItemGroup>
     <PackageReference Include="dotenv.net" Version="3.2.1" />
     <PackageReference Include="Nethereum.Web3" Version="4.25.0" />
+    <PackageReference Include="Solnet.Programs" Version="6.1.0" />
+    <PackageReference Include="Solnet.Rpc" Version="6.1.0" />
+    <PackageReference Include="Solnet.Wallet" Version="6.1.0" />
   </ItemGroup>
 
 </Project>

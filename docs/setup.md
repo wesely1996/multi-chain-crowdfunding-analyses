@@ -329,6 +329,275 @@ Fee note: Solana base fee = 5 000 lamports / signature (flat).
 > Keypair file: `/home/veseli/.config/solana/id.json` (WSL only — never commit this file).
 > Store the seed phrase in a password manager, not in this repo.
 
+## Integration Clients
+
+Two integration clients interact with both EVM and Solana contracts. They execute the
+full lifecycle (create, contribute, finalize, withdraw, refund, status) and emit
+structured JSON output with txHash, gasUsed/fee, and timing data.
+
+### TypeScript + viem (`clients/ts-evm/`)
+
+#### Install
+
+```bash
+cd clients/ts-evm
+npm install
+```
+
+#### Environment
+
+```bash
+cp .env.example .env
+# Edit .env — populate contract addresses from deploy.ts output
+```
+
+Required EVM variables: `RPC_URL`, `PRIVATE_KEY`, `FACTORY_ADDRESS`, `CAMPAIGN_ADDRESS`, `PAYMENT_TOKEN_ADDRESS`.
+Required Solana variables: `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `SOLANA_PROGRAM_ID`, `SOLANA_PAYMENT_MINT`, `SOLANA_CAMPAIGN_ADDRESS`, `SOLANA_CAMPAIGN_ID`.
+
+#### EVM commands
+
+All scripts use `tsx` for ESM execution. Run from `clients/ts-evm/`:
+
+```bash
+npm run create-campaign                          # defaults: softCap=100e6, hardCap=500e6, 30 days, [30,30,40]
+npm run create-campaign -- --soft-cap 50000000 --hard-cap 200000000 --deadline-days 7
+
+npm run contribute                               # default: 10 USDC (10000000 raw)
+npm run contribute -- --amount 25000000
+
+npm run finalize
+npm run withdraw
+npm run refund
+
+npm run status
+npm run status -- --contributor 0xABC...
+```
+
+#### Solana commands
+
+```bash
+npm run sol:create-campaign
+npm run sol:create-campaign -- --soft-cap 100000000 --hard-cap 500000000 --deadline-seconds 1800
+
+npm run sol:contribute
+npm run sol:contribute -- --amount 10000000 --campaign <ADDRESS>
+
+npm run sol:finalize
+npm run sol:withdraw
+npm run sol:refund
+
+npm run sol:status
+npm run sol:status -- --campaign <ADDRESS> --contributor <PUBKEY>
+```
+
+#### JSON output format
+
+Every command emits a single JSON object to stdout:
+
+```json
+{
+  "chain": "evm",
+  "operation": "contribute",
+  "txHash": "0x...",
+  "blockNumber": 5,
+  "gasUsed": 103257,
+  "status": "success",
+  "timestamp": "2026-03-08T12:00:00.000Z",
+  "elapsedMs": 145,
+  "data": { "amount": "10000000" }
+}
+```
+
+For Solana: `chain` = `"solana"`, `blockNumber` → slot, `gasUsed` → fee (lamports).
+
+---
+
+### .NET + Nethereum / Solnet (`clients/dotnet/`)
+
+#### Prerequisites
+
+- .NET 8 SDK (`dotnet --version` should return `8.x`)
+
+#### Build
+
+```bash
+cd clients/dotnet
+dotnet build
+```
+
+#### Environment
+
+```bash
+cp .env.example .env
+# Edit .env — populate contract addresses from deploy.ts / anchor deploy output
+```
+
+Uses `dotenv.net` to load `.env`. Same variable names as the TS client for EVM;
+Solana variables: `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `SOLANA_PROGRAM_ID`,
+`SOLANA_PAYMENT_MINT`, `SOLANA_CAMPAIGN_ADDRESS`, `SOLANA_CAMPAIGN_ID`.
+
+#### EVM commands
+
+```bash
+dotnet run -- create-campaign
+dotnet run -- create-campaign --soft-cap 50000000 --hard-cap 200000000 --deadline-days 7
+
+dotnet run -- contribute
+dotnet run -- contribute --amount 25000000
+
+dotnet run -- finalize
+dotnet run -- withdraw
+dotnet run -- refund
+
+dotnet run -- status
+dotnet run -- status --contributor 0xABC...
+```
+
+#### Solana commands
+
+```bash
+dotnet run -- sol:create-campaign
+dotnet run -- sol:create-campaign --soft-cap 100000000 --hard-cap 500000000 --deadline-seconds 1800
+
+dotnet run -- sol:contribute
+dotnet run -- sol:contribute --amount 10000000 --campaign <ADDRESS>
+
+dotnet run -- sol:finalize --campaign <ADDRESS>
+dotnet run -- sol:withdraw --campaign <ADDRESS>
+dotnet run -- sol:refund --campaign <ADDRESS>
+
+dotnet run -- sol:status
+dotnet run -- sol:status --campaign <ADDRESS> --contributor <PUBKEY>
+```
+
+#### JSON output
+
+Same D10 JSON schema as the TypeScript client. All output goes to stdout.
+
+---
+
+## Testing the Clients
+
+### EVM — full lifecycle (both clients)
+
+Prerequisites: Hardhat node running + contracts deployed.
+
+```bash
+# Terminal 1 — start Hardhat node
+cd contracts/evm
+npx hardhat node
+
+# Terminal 2 — deploy contracts (note the addresses printed)
+cd contracts/evm
+npx hardhat run scripts/deploy.ts --network localhost
+```
+
+Copy the deployed addresses (`MockERC20`, `CrowdfundingFactory`, `CrowdfundingCampaign`)
+into the `.env` files for both `clients/ts-evm/` and `clients/dotnet/`.
+
+Then run the full lifecycle in order:
+
+```bash
+# ── TypeScript client ──
+cd clients/ts-evm
+npm run create-campaign
+npm run contribute -- --amount 10000000
+# (repeat contribute or advance time via Hardhat RPC to pass deadline)
+npm run finalize
+npm run withdraw         # if campaign succeeded (totalRaised >= softCap)
+npm run refund           # if campaign failed (totalRaised < softCap)
+npm run status
+
+# ── .NET client (same node, same contracts) ──
+cd clients/dotnet
+dotnet run -- status     # verify it reads the same state
+dotnet run -- contribute --amount 10000000
+dotnet run -- status
+```
+
+To test the **refund path**, create a campaign with a high softCap, contribute less
+than the softCap, advance time past the deadline, finalize, then refund:
+
+```bash
+# Advance Hardhat time by 31 days (from any client directory)
+curl -s -X POST http://127.0.0.1:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"evm_increaseTime","params":[2678400],"id":1}'
+curl -s -X POST http://127.0.0.1:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"evm_mine","params":[],"id":2}'
+```
+
+### Solana — full lifecycle (both clients)
+
+Prerequisites: WSL with Solana/Anchor toolchain installed (see above).
+
+```bash
+# Terminal 1 (WSL) — start local validator
+cd ~
+solana-test-validator --reset
+
+# Terminal 2 (WSL) — deploy program + create SPL mint
+cd /mnt/c/Users/<you>/Desktop/SCHOOL/Master\ rad/multi-chain-crowdfunding-analyses/contracts/solana
+anchor build
+anchor deploy
+```
+
+After deploying, you need an SPL token mint for payments. Create one with:
+
+```bash
+spl-token create-token --decimals 6
+# Note the mint address → set as SOLANA_PAYMENT_MINT in .env
+```
+
+Update `.env` files in both `clients/ts-evm/` and `clients/dotnet/` with:
+- `SOLANA_PROGRAM_ID` — from `anchor deploy` output
+- `SOLANA_PAYMENT_MINT` — from `spl-token create-token` output
+- `SOLANA_KEYPAIR_PATH` — path to your Solana keypair JSON file
+
+Then run the lifecycle:
+
+```bash
+# ── TypeScript client ──
+cd clients/ts-evm
+npm run sol:create-campaign
+# Copy the campaignAddress from output → set SOLANA_CAMPAIGN_ADDRESS in .env or pass --campaign
+
+npm run sol:contribute -- --amount 10000000
+
+# Wait for deadline to pass (default 1800s = 30 min; use --deadline-seconds 10 for quick testing)
+npm run sol:finalize
+npm run sol:withdraw      # success path
+npm run sol:refund        # fail path
+npm run sol:status
+
+# ── .NET client ──
+cd clients/dotnet
+dotnet run -- sol:status --campaign <ADDRESS>
+dotnet run -- sol:contribute --amount 10000000 --campaign <ADDRESS>
+```
+
+> **Quick test tip:** Use `--deadline-seconds 10` when creating a campaign so you
+> only wait 10 seconds before finalize becomes callable.
+
+### Cross-client verification
+
+For thesis data integrity, run the same operation from both clients against the same
+node and compare the JSON output:
+
+```bash
+# EVM — gasUsed must be identical for the same operation
+cd clients/ts-evm && npm run status 2>/dev/null | jq .data.totalRaised
+cd clients/dotnet && dotnet run -- status 2>/dev/null | jq .data.totalRaised
+# Both should return the same value
+
+# Solana — fee/slot should match for equivalent operations
+```
+
+Pipe any command output through `jq .` to validate JSON format.
+
+---
+
 ## Version Matrix (tested baseline)
 
 | Tool                    | Version         |
@@ -344,3 +613,9 @@ Fee note: Solana base fee = 5 000 lamports / signature (flat).
 | anchor-lang             | 0.32.1          |
 | anchor-spl              | 0.32.1          |
 | @solana/spl-token (TS)  | 0.3.11          |
+| viem                    | 2.21.x          |
+| tsx                     | 4.19.x          |
+| Nethereum.Web3          | 4.25.0          |
+| dotenv.net              | 3.2.1           |
+| Solnet.Rpc/Wallet       | 6.1.0           |
+| .NET SDK                | 8.0              |
