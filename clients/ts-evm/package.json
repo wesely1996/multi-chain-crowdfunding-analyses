@@ -9,9 +9,18 @@
     "finalize": "tsx src/finalize.ts",
     "withdraw": "tsx src/withdraw.ts",
     "refund": "tsx src/refund.ts",
-    "status": "tsx src/status.ts"
+    "status": "tsx src/status.ts",
+    "sol:create-campaign": "tsx src/solana/create-campaign.ts",
+    "sol:contribute": "tsx src/solana/contribute.ts",
+    "sol:finalize": "tsx src/solana/finalize.ts",
+    "sol:withdraw": "tsx src/solana/withdraw.ts",
+    "sol:refund": "tsx src/solana/refund.ts",
+    "sol:status": "tsx src/solana/status.ts"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.30.1",
+    "@solana/spl-token": "^0.3.11",
+    "@solana/web3.js": "^1.95.4",
     "dotenv": "^16.4.5",
     "viem": "^2.21.0"
   },
