@@ -78,6 +78,26 @@ extensions are planned for later thesis milestones and are fully excluded from M
 
 ---
 
+## 4a. Client Layer Scope
+
+The two integration client layers — TypeScript and .NET — evolve in parallel with the contract
+variants. Excluding a variant from MVP benchmarks does not exclude it from the final client
+abstraction goals. The benchmark scope and the client architecture scope are distinct.
+
+| Stage | TypeScript client | .NET client | Variants supported |
+|-------|------------------|-------------|-------------------|
+| MVP | viem (EVM ERC-20) + Anchor TS (Solana SPL) | Nethereum (EVM ERC-20) + Solana.NET/RPC (Solana SPL) | V1 + V4 (SPL only) |
+| Full thesis scope | Extended to ERC-4626, ERC-1155, and Token-2022 variants | Extended to ERC-4626, ERC-1155, and Token-2022 variants | V1 + V2 + V3 + V4 |
+
+`[recommendation]` Both client layers are designed from the start to be variant-aware. A client's
+absence of support for a planned variant at MVP stage is a temporary implementation-stage
+limitation, not the intended final design.
+
+`[fact]` The repository structure is staged: `clients/ts-evm/` and `clients/dotnet/` reflect
+the MVP layout and will evolve as additional variants are implemented.
+
+---
+
 ## 5. What Is Intentionally Excluded
 
 The following features are explicitly out of scope for the MVP. Each exclusion is a deliberate

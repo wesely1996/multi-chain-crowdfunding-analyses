@@ -14,7 +14,7 @@ Two blockchain platforms implement an identical crowdfunding state machine:
 |-----------|----------------------|------------------------|
 | Token standard | ERC-20 receipt token per campaign | SPL Token (fungible) |
 | Deployment model | One contract per campaign (singleton) | One program; one Campaign PDA per campaign |
-| Payment asset | Native ETH | Native SOL (lamports) |
+| Payment asset | ERC-20 token (stablecoin, e.g. USDC) | SPL token (payment_mint) |
 | Finality model | Probabilistic (~12 s on mainnet) | Optimistic (400 ms slots, ~2–3 s hard finality) |
 | Toolchain | Hardhat 2.22.x, viem | Anchor 0.32.1, @solana/web3.js |
 
@@ -109,39 +109,82 @@ Runtime mutable fields:
 
 | EVM Function | Solana Instruction | Caller | Description |
 |--------------|--------------------|--------|-------------|
-| `createCampaign(...)` | `create_campaign(...)` | Anyone (deployer) | Initialise campaign with parameters |
-| `fund(amount)` | `fund(amount)` | Any signer | Contribute ETH / SOL; mint receipt tokens |
-| `finalize()` | `finalize_campaign()` | Anyone (permissionless) | Compute outcome after deadline |
+| `createCampaign(...)` (via Factory) | `initialize_campaign(...)` | Anyone (deployer) | Initialise campaign with parameters |
+| `contribute(amount)` | `contribute(amount)` | Any signer | Contribute; mint receipt tokens |
+| `finalize()` | `finalize()` | Anyone (permissionless) | Compute outcome after deadline |
 | `withdrawMilestone()` | `withdraw_milestone()` | Creator only | Release next milestone tranche to creator |
-| `refund()` | `claim_refund()` | Contributor | Return contribution if campaign failed |
+| `refund()` | `refund()` | Contributor | Return contribution if campaign failed |
 
-> **Naming rationale**: EVM uses camelCase per Solidity convention; Solana uses snake_case per
-> Rust convention. The two naming schemes are equivalent — each pair maps 1-to-1.
+> **Naming rationale**: Both platforms use the same verb roots (`contribute`, `finalize`, `refund`,
+> `withdrawMilestone` / `withdraw_milestone`) for improved cross-chain mental mapping. EVM uses
+> camelCase per Solidity convention; Solana uses snake_case per Rust convention.
+
+---
+
+## 4a. Client Layer Architecture
+
+The thesis includes two integration client layers — TypeScript and .NET — that interact with all
+implemented contract variants at each stage. Client support is stage-aware: it grows as new
+variants are implemented. A client's inability to reach a variant at a given stage is a temporary
+implementation-stage limitation, not the intended final design.
+
+### 4a.1 Stage-Aware Coverage
+
+| Stage | TypeScript client | .NET client |
+|-------|-----------------|-------------|
+| MVP (V1 ERC-20 + V4 SPL) | viem — EVM ERC-20; Anchor TS + @solana/web3.js — Solana SPL | Nethereum — EVM ERC-20; Solana.NET / JSON-RPC — Solana SPL |
+| Full thesis scope (V1–V4) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana |
+
+> **Design intent**: Both client layers — TypeScript and .NET — are intended to support every
+> variant that exists at the current implementation stage. In the MVP this means both clients
+> cover the two baseline implementations only (EVM ERC-20 and Solana SPL). In the full thesis
+> scope both clients are extended to cover all four variants. The current repository layout
+> (`clients/ts-evm/` and `clients/dotnet/`) reflects the MVP stage and will evolve.
+
+### 4a.2 Canonical Client Operations
+
+Both client layers expose the same five canonical operations regardless of chain or variant.
+The underlying transport (viem, Anchor TS, Nethereum, Solana.NET) is selected per variant.
+
+| Operation | TypeScript | .NET |
+|-----------|-----------|------|
+| Create campaign | `createCampaign(params)` | `CampaignService.CreateCampaign(params)` |
+| Contribute | `contribute(amount)` | `CampaignService.Contribute(amount)` |
+| Finalize | `finalize()` | `CampaignService.Finalize()` |
+| Withdraw milestone | `withdrawMilestone()` | `CampaignService.WithdrawMilestone()` |
+| Refund | `refund()` | `CampaignService.Refund()` |
+
+This uniform operation surface is the basis for the integration complexity metric in the
+Developer Experience evaluation. It also means that benchmarking scripts can drive either
+client layer against either chain without changing the operation names.
 
 ---
 
 ## 5. EVM Storage Layout
 
-The EVM contract follows the **singleton** pattern: one contract instance per campaign. There is
-no factory contract in the MVP.
+The EVM contract follows the **singleton** pattern — one `CrowdfundingCampaign` instance per
+campaign. A `CrowdfundingFactory` contract deploys these singletons and maintains a registry,
+but does not proxy calls.
 
 ```
-Crowdfunding.sol storage
+CrowdfundingCampaign.sol storage
 ┌─────────────────────────────────────────────────────────────────┐
 │ Immutables (stored in bytecode, not storage slots)              │
 │   address   public immutable creator                            │
+│   IERC20    public immutable paymentToken                       │
 │   uint256   public immutable softCap                            │
 │   uint256   public immutable hardCap                            │
 │   uint256   public immutable deadline                           │
-│   CrowdfundingToken public immutable receiptToken               │
-│   uint8[]   public  immutable milestonePercentages  (ABI-enc)  │
 ├─────────────────────────────────────────────────────────────────┤
 │ Storage slots (state variables)                                 │
 │   slot 0:  uint256  totalRaised                                 │
 │   slot 1:  bool     finalized                                   │
-│   slot 1:  bool     success         (packed with finalized)     │
+│   slot 1:  bool     successful      (packed with finalized)     │
 │   slot 1:  uint8    currentMilestone (packed)                   │
+│   slot 2:  uint256  totalWithdrawn                              │
+│   uint8[]  milestonePercentages     (dynamic — D6)              │
 │   mapping(address => uint256) contributions  (keccak slot)      │
+│   CampaignToken  receiptToken       (storage — D7)              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -150,15 +193,17 @@ Crowdfunding.sol storage
 | Field | Type | Visibility | Notes |
 |-------|------|------------|-------|
 | `creator` | `address` | `public immutable` | Set in constructor; cannot change |
-| `softCap` | `uint256` | `public immutable` | In wei |
-| `hardCap` | `uint256` | `public immutable` | In wei; `hardCap >= softCap` enforced at construction |
+| `paymentToken` | `IERC20` | `public immutable` | ERC-20 token used for contributions |
+| `softCap` | `uint256` | `public immutable` | In payment token units |
+| `hardCap` | `uint256` | `public immutable` | In payment token units; `hardCap >= softCap` enforced at construction |
 | `deadline` | `uint256` | `public immutable` | `block.timestamp` unit; must be in the future |
-| `receiptToken` | `CrowdfundingToken` | `public immutable` | ERC-20 deployed in constructor |
-| `milestonePercentages` | `uint8[]` | `public` | ABI-encoded immutable; `sum == 100` validated at construction |
-| `totalRaised` | `uint256` | `public` | Incremented on each `fund` call |
+| `milestonePercentages` | `uint8[]` | `public` | Storage array (D6: `immutable` unsupported for dynamic arrays); `sum == 100` validated at construction |
+| `receiptToken` | `CampaignToken` | `public` | ERC-20 deployed in constructor; stored in storage (D7: address known only post-deploy) |
+| `totalRaised` | `uint256` | `public` | Incremented on each `contribute` call |
 | `finalized` | `bool` | `public` | Written once; `true` after `finalize()` |
-| `success` | `bool` | `public` | Written once during `finalize()` |
+| `successful` | `bool` | `public` | Written once during `finalize()` |
 | `currentMilestone` | `uint8` | `public` | 0-indexed; incremented on each successful `withdrawMilestone` |
+| `totalWithdrawn` | `uint256` | `public` | Cumulative amount transferred to creator |
 | `contributions` | `mapping(address ⇒ uint256)` | `public` | Zeroed on refund (CEI) |
 
 ### 5.2 Overflow and Arithmetic
@@ -229,25 +274,26 @@ ContributorRecord account layout
 
 ```mermaid
 graph LR
-    Creator["Creator Pubkey"] -->|seed| CampaignPDA["Campaign PDA\n[b'campaign', creator]"]
-    CampaignPDA -->|seed| Vault["Vault\n(SOL escrow — system-owned)"]
+    Creator["Creator Pubkey"] -->|seed| CampaignPDA["Campaign PDA\n[b'campaign', creator, campaign_id]"]
+    CampaignPDA -->|seed| Vault["Vault TokenAccount\n[b'vault', campaign]"]
     CampaignPDA -->|seed| ReceiptMint["Receipt Mint PDA\n[b'receipt_mint', campaign]"]
     CampaignPDA -->|seed| ContributorPDA["ContributorRecord PDA\n[b'contributor', campaign, contributor]"]
 
     ReceiptMint -.->|mint_authority| CrowdfundingProgram["Crowdfunding Program"]
-    Vault -.->|lamport custody| CrowdfundingProgram
+    Vault -.->|authority| CampaignPDA
 ```
 
-> **Note on Vault**: Because the payment asset is native SOL (not a SPL token), the vault is
-> simply the Campaign PDA itself acting as a lamport-holding account. SOL is transferred into
-> and out of the Campaign PDA directly. No separate TokenAccount is needed for the SOL escrow.
-> The Receipt Mint PDA issues SPL receipt tokens to contributors.
+> **Note on Vault**: The payment asset is a SPL token (fungible token on `payment_mint`).
+> The vault is a dedicated SPL `TokenAccount` PDA (`["vault", campaign.key()]`) whose authority
+> is the Campaign PDA. This matches the EVM side where the `CrowdfundingCampaign` contract holds
+> the ERC-20 payment tokens. The Receipt Mint PDA issues SPL receipt tokens to contributors.
 
 ### 7.2 PDA Seed Table
 
 | Account | Seeds | Bump stored in |
 |---------|-------|----------------|
-| Campaign | `[b"campaign", creator.key()]` | `campaign.bump` |
+| Campaign | `[b"campaign", creator.key(), campaign_id.to_le_bytes()]` | `campaign.bump` |
+| Vault | `[b"vault", campaign.key()]` | `campaign.vault_bump` |
 | Receipt Mint | `[b"receipt_mint", campaign.key()]` | `campaign.receipt_mint_bump` |
 | ContributorRecord | `[b"contributor", campaign.key(), contributor.key()]` | `contributor_record.bump` |
 
@@ -317,8 +363,8 @@ These invariants must hold at all times. Each is enforced at the listed point.
 | Event | Fields | Emitted in |
 |-------|--------|-----------|
 | `CampaignCreated` | `creator`, `softCap`, `hardCap`, `deadline` | Constructor |
-| `Funded` | `contributor`, `amount`, `totalRaised` | `fund()` |
-| `Finalized` | `success`, `totalRaised` | `finalize()` |
+| `Contributed` | `contributor`, `amount`, `totalRaised` | `contribute()` |
+| `Finalized` | `successful`, `totalRaised` | `finalize()` |
 | `MilestoneWithdrawn` | `milestoneIndex`, `amount`, `recipient` | `withdrawMilestone()` |
 | `Refunded` | `contributor`, `amount` | `refund()` |
 
@@ -365,7 +411,16 @@ Anchor emits structured logs via the `emit!` macro (on-chain CPI event log).
 | **Tradeoffs** | SPL Token: maximum tooling compatibility, no extension complexity, Anchor 0.32.1 has first-class support. Token-2022: enables richer receipt token mechanics but adds account size variability and extension CPI complexity that would confound the MVP comparison |
 | **Why chosen** | The MVP comparison must isolate platform differences, not feature differences. SPL Token is the direct counterpart of a plain ERC-20. Token-2022 extensions are a separate thesis variant and will be analysed independently |
 
-### D4 — Milestone Percentage Array vs Fixed Splits
+### D4 — Canonical Function Naming
+
+| | Detail |
+|-|--------|
+| **Decision** | Use `contribute / refund / finalize / withdrawMilestone` (EVM) and `initialize_campaign / contribute / finalize / withdraw_milestone / refund` (Solana) |
+| **Options considered** | (A) Original canonical draft names: `fund`, `claim_refund`, `finalize_campaign`; (B) Names as implemented |
+| **Tradeoffs** | `contribute` is explicit about the crowdfunding action (vs. `fund` which is ambiguous in DeFi context). `refund` is unambiguous in context; `claim_refund` adds no information. Solana `finalize` is sufficient — the program namespace already scopes it to the campaign. Having both platforms use the same verb (`contribute`, `finalize`, `refund`) improves cross-chain mental mapping |
+| **Why chosen** | Implemented names were chosen for clarity and cross-chain naming symmetry. Renaming to match the original draft would require updating all tests, clients, and benchmark scripts with no semantic gain |
+
+### D5 — Milestone Percentage Array vs Fixed Splits
 
 | | Detail |
 |-|--------|

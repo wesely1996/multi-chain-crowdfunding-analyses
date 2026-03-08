@@ -74,7 +74,7 @@ contract CrowdfundingCampaign is ReentrancyGuard {
         uint256 totalRaised
     );
     event Finalized(bool successful, uint256 totalRaised);
-    event MilestoneWithdrawn(uint256 indexed milestoneIndex, uint256 amount);
+    event MilestoneWithdrawn(uint256 indexed milestoneIndex, uint256 amount, address recipient);
     event Refunded(address indexed contributor, uint256 amount);
 
     // -------------------------------------------------------------------------
@@ -170,7 +170,7 @@ contract CrowdfundingCampaign is ReentrancyGuard {
 
         paymentToken.safeTransfer(creator, amount);
 
-        emit MilestoneWithdrawn(milestoneIndex, amount);
+        emit MilestoneWithdrawn(milestoneIndex, amount, creator);
     }
 
     /// @notice Refund the caller's full contribution. Only callable on failed campaigns.

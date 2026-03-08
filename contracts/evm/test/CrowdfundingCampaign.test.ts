@@ -261,12 +261,12 @@ describe("CrowdfundingCampaign", () => {
       // milestone 0: 30%
       await expect(campaign.connect(creator).withdrawMilestone())
         .to.emit(campaign, "MilestoneWithdrawn")
-        .withArgs(0n, SOFT_CAP * 30n / 100n);
+        .withArgs(0n, SOFT_CAP * 30n / 100n, creatorAddr);
 
       // milestone 1: 30%
       await expect(campaign.connect(creator).withdrawMilestone())
         .to.emit(campaign, "MilestoneWithdrawn")
-        .withArgs(1n, SOFT_CAP * 30n / 100n);
+        .withArgs(1n, SOFT_CAP * 30n / 100n, creatorAddr);
 
       // milestone 2: last — sweeps remaining
       await campaign.connect(creator).withdrawMilestone();
@@ -277,6 +277,7 @@ describe("CrowdfundingCampaign", () => {
     it("15. last milestone sweeps remaining balance (no dust)", async () => {
       const { campaign, usdc, creator } = await successFixture();
       const campaignAddr = await campaign.getAddress();
+      const creatorAddr = await creator.getAddress();
 
       // exhaust first two milestones
       await campaign.connect(creator).withdrawMilestone();
@@ -285,7 +286,7 @@ describe("CrowdfundingCampaign", () => {
       const remaining = await usdc.balanceOf(campaignAddr);
       await expect(campaign.connect(creator).withdrawMilestone())
         .to.emit(campaign, "MilestoneWithdrawn")
-        .withArgs(2n, remaining);
+        .withArgs(2n, remaining, creatorAddr);
 
       expect(await usdc.balanceOf(campaignAddr)).to.equal(0n);
     });
