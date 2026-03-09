@@ -137,7 +137,7 @@ from the previous transaction's access list. [assumption]
 | Deadline | 5-second fast campaign (finalize/withdraw sub-benchmark) |
 | Priority fees | None set (base fee only) |
 
-#### 4.1 `fund()` — Sequential Fee & Latency (N = 50)
+#### 4.1 `contribute()` — Sequential Fee & Latency (N = 50)
 
 | Metric | Lamports | SOL |
 |--------|----------:|----:|
@@ -149,7 +149,7 @@ from the previous transaction's access list. [assumption]
 | Latency max (ms) | — | 497 |
 
 **Observation — flat fee model [fact]:**
-Solana charges a base fee of 5,000 lamports per signature. The `fund()` instruction requires
+Solana charges a base fee of 5,000 lamports per signature. The `contribute()` instruction requires
 two signers (payer + contributor), yielding a deterministic 10,000 lamports per transaction
 regardless of instruction complexity. There is no analogue to EVM gas units; computational
 cost is measured separately in Compute Units (CUs) and capped at 200,000 CU/instruction by
@@ -163,13 +163,13 @@ fee variability (fees are flat) but by slot-boundary timing: a transaction landi
 a slot confirms faster than one submitted just after a slot boundary. This variance is
 expected to be higher on devnet (variable congestion) and should be re-measured there.
 
-#### 4.2 `finalize_campaign()` — Fee & Latency
+#### 4.2 `finalize()` — Fee & Latency
 
 | Metric | Lamports | SOL | Time (ms) |
 |--------|----------:|----:|----------:|
 | Fee | 5,000 | 0.000005000 | 306 |
 
-**Observation:** `finalize_campaign()` has a single signer (the caller), hence the base fee
+**Observation:** `finalize()` has a single signer (the caller), hence the base fee
 is 5,000 lamports (one signature). This is the only instruction in the benchmark that costs
 half the contribution fee, consistent with the single-signer design in the Anchor program.
 
@@ -277,8 +277,8 @@ substantially higher throughput but is out of scope for this controlled comparis
    reported in this benchmark run but should be recorded for the testnet comparison.
 
 5. **Solana fee model.** Solana charges a base fee of 5,000 lamports per signature per
-   transaction. Instructions with two signers (e.g. `fund`, `withdraw_milestone`) cost
-   10,000 lamports; instructions with one signer (e.g. `finalize_campaign`) cost 5,000
+   transaction. Instructions with two signers (e.g. `contribute`, `withdraw_milestone`) cost
+   10,000 lamports; instructions with one signer (e.g. `finalize`) cost 5,000
    lamports. There is no per-instruction gas metering analogous to EVM gas units. Compute
    Unit (CU) consumption is a separate resource limit (default 200,000 CU/instruction) and
    was not recorded in this benchmark run. Priority fees (`ComputeBudgetProgram`) were not

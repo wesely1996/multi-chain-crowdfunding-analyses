@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import * as anchor from "@coral-xyz/anchor";
+import BN from "bn.js";
 import { SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
@@ -24,12 +24,12 @@ const { values } = parseArgs({
 });
 
 async function main() {
-  const softCap = new anchor.BN(Math.round(Number(values["soft-cap"]!) * 10 ** DECIMALS));
-  const hardCap = new anchor.BN(Math.round(Number(values["hard-cap"]!) * 10 ** DECIMALS));
+  const softCap = new BN(Math.round(Number(values["soft-cap"]!) * 10 ** DECIMALS));
+  const hardCap = new BN(Math.round(Number(values["hard-cap"]!) * 10 ** DECIMALS));
   const deadlineSeconds = Number(values["deadline-seconds"]!);
-  const deadline = new anchor.BN(Math.floor(Date.now() / 1000) + deadlineSeconds);
+  const deadline = new BN(Math.floor(Date.now() / 1000) + deadlineSeconds);
   const milestones = Buffer.from(values["milestones"]!.split(",").map(Number));
-  const campaignId = new anchor.BN(values["campaign-id"] ?? (Date.now() & 0xffffffff));
+  const campaignId = new BN(values["campaign-id"] ?? (Date.now() & 0xffffffff));
 
   const campaign = campaignPda(wallet.publicKey, campaignId);
   const vault = vaultPda(campaign);
@@ -80,4 +80,4 @@ async function main() {
   });
 }
 
-main().catch((err) => printError("create-campaign", err));
+main().catch((err) => printError("create-campaign", err, "solana"));

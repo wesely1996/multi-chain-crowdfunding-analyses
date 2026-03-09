@@ -600,22 +600,24 @@ Pipe any command output through `jq .` to validate JSON format.
 
 ## Version Matrix (tested baseline)
 
-| Tool                    | Version         |
-| ----------------------- | --------------- |
-| Node.js                 | 20.x LTS        |
-| TypeScript              | 5.4.x           |
-| Hardhat                 | 2.22.x          |
-| @openzeppelin/contracts | 5.1.x           |
-| Solidity                | 0.8.20          |
-| Rust                    | stable (1.84+)  |
-| Solana CLI              | 3.0.15 (stable) |
-| Anchor CLI              | 0.32.1          |
-| anchor-lang             | 0.32.1          |
-| anchor-spl              | 0.32.1          |
-| @solana/spl-token (TS)  | 0.3.11          |
-| viem                    | 2.21.x          |
-| tsx                     | 4.19.x          |
-| Nethereum.Web3          | 4.25.0          |
-| dotenv.net              | 3.2.1           |
-| Solnet.Rpc/Wallet       | 6.1.0           |
-| .NET SDK                | 8.0              |
+| Tool                    | Version         | Scope                                    |
+| ----------------------- | --------------- | ---------------------------------------- |
+| Node.js                 | 20.x LTS        | All TypeScript tooling                   |
+| TypeScript              | 5.4.x           | EVM + Solana clients                     |
+| Hardhat                 | 2.22.x          | EVM compilation, testing, local node     |
+| @openzeppelin/contracts | 5.1.x           | ERC-20 base implementation               |
+| Solidity                | 0.8.20          | EVM contract compiler                    |
+| Rust                    | stable (1.84+)  | Solana program compilation               |
+| Solana CLI              | 3.0.15 (stable) | Program deployment, account inspection   |
+| Anchor CLI              | 0.32.1          | Build, test, deploy (contracts/solana/)  |
+| anchor-lang             | 0.32.1          | Solana program framework                 |
+| anchor-spl              | 0.32.1          | SPL Token CPI helpers                    |
+| @coral-xyz/anchor (TS)  | 0.30.1          | TS client Anchor SDK (clients/ts-evm/)   |
+| @solana/spl-token (TS)  | 0.3.11          | SPL token helpers                        |
+| @solana/web3.js         | 1.95.4          | Solana RPC and transaction building      |
+| viem                    | 2.21.x          | EVM client RPC and contract interaction  |
+| tsx                     | 4.19.x          | TypeScript ESM execution                 |
+| Nethereum.Web3          | 4.25.0          | .NET EVM client                          |
+| dotenv.net              | 3.2.1           | .NET env var loading                     |
+| Solnet.Rpc/Wallet       | 6.1.0           | .NET Solana client                       |
+| .NET SDK                | 8.0             | .NET build toolchain                     |

@@ -30,17 +30,17 @@ the basis for the comparative analysis in the thesis.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Created : createCampaign() / create_campaign()
+    [*] --> Created : createCampaign() / initialize_campaign()
 
     Created --> Funding : implicit — campaign is live on deploy/create
 
-    Funding --> Finalized : finalize() / finalize_campaign()\n[guard: block.timestamp > deadline\n / Clock::get().unix_timestamp > deadline]
+    Funding --> Finalized : finalize() / finalize()\n[guard: block.timestamp > deadline\n / Clock::get().unix_timestamp > deadline]
 
     Finalized --> Success : [totalRaised >= softCap]
     Finalized --> Failed  : [totalRaised < softCap]
 
     Success --> Success : withdrawMilestone() / withdraw_milestone()\n[guard: currentMilestone < milestoneCount]
-    Failed  --> Failed  : refund() / claim_refund()\n[guard: contribution > 0]
+    Failed  --> Failed  : refund() / refund()\n[guard: contribution > 0]
 
     Success --> [*] : all milestones withdrawn
     Failed  --> [*] : all contributors refunded
@@ -64,11 +64,11 @@ enum migration complexity and simplifies upgrade paths.
 | Transition | Trigger | Guard |
 |------------|---------|-------|
 | Created → Funding | Campaign deployed / PDA initialised | Implicit — campaign is live immediately |
-| Funding → Finalized | `finalize()` / `finalize_campaign()` called | `timestamp > deadline` |
+| Funding → Finalized | `finalize()` / `finalize()` called | `timestamp > deadline` |
 | Finalized → Success | Part of `finalize` execution | `totalRaised >= softCap` |
 | Finalized → Failed | Part of `finalize` execution | `totalRaised < softCap` |
 | Success → Success | `withdrawMilestone()` / `withdraw_milestone()` | `currentMilestone < milestoneCount` |
-| Failed → Failed | `refund()` / `claim_refund()` | `contribution[caller] > 0` |
+| Failed → Failed | `refund()` / `refund()` | `contribution[caller] > 0` |
 | Success → terminal | Last `withdrawMilestone` called | `currentMilestone == milestoneCount` |
 | Failed → terminal | Last contributor refunded | All `contributions` zeroed |
 
@@ -77,7 +77,7 @@ enum migration complexity and simplifies upgrade paths.
 - **EVM**: `require(!finalized, "Already finalized")` at the top of `finalize()`. The `finalized`
   boolean is set to `true` before any state-dependent logic executes (CEI pattern).
 - **Solana**: `require!(!campaign.finalized, CrowdfundingError::AlreadyFinalized)` at the top of
-  `finalize_campaign`. Anchor's account constraint `#[account(mut)]` does not prevent re-entry on
+  `finalize`. Anchor's account constraint `#[account(mut)]` does not prevent re-entry on
   its own — the explicit bool check is mandatory.
 
 ---
@@ -92,7 +92,7 @@ All parameters are set at creation and are immutable thereafter.
 | `hardCap` / `hard_cap` | `uint256 immutable` | `u64` | No | Maximum raise; contributions rejected above this |
 | `deadline` / `deadline` | `uint256 immutable` | `i64` | No | Unix timestamp; funding closes after this |
 | `creator` | `address immutable` | `Pubkey` | No | Campaign owner; receives milestone withdrawals |
-| `milestonePercentages` / `milestone_percentages` | `uint8[]` | `Vec<u8>` | No | Array of percentages summing to 100 |
+| `milestonePercentages` / `milestones` | `uint8[]` | `[u8; 10]` + `milestone_count: u8` | No | Array of percentages summing to 100 (Solana uses fixed-size array with separate count) |
 
 Runtime mutable fields:
 
@@ -227,24 +227,26 @@ Campaign account layout (Anchor-serialised, Borsh)
 ┌──────────────────────────────────────────────────────────┐
 │  discriminator              8 bytes  (Anchor type tag)   │
 │  creator          Pubkey   32 bytes                      │
+│  payment_mint     Pubkey   32 bytes                      │
+│  receipt_mint     Pubkey   32 bytes                      │
 │  soft_cap         u64       8 bytes                      │
 │  hard_cap         u64       8 bytes                      │
 │  deadline         i64       8 bytes  (Unix timestamp)    │
 │  total_raised     u64       8 bytes                      │
 │  finalized        bool      1 byte                       │
-│  success          bool      1 byte                       │
-│  milestone_percentages  Vec<u8>                          │
-│    length prefix          4 bytes                        │
-│    data (max 10 entries) 10 bytes                        │
-│  current_milestone  u8     1 byte                        │
-│  bump              u8      1 byte   (Campaign PDA bump)  │
-│  vault_bump        u8      1 byte   (Vault PDA bump)     │
-│  receipt_mint_bump u8      1 byte   (Mint PDA bump)      │
+│  successful       bool      1 byte                       │
+│  current_milestone  u8      1 byte                       │
+│  total_withdrawn  u64       8 bytes                      │
+│  milestone_count  u8        1 byte                       │
+│  milestones       [u8; 10] 10 bytes  (fixed array)       │
+│  campaign_id      u64       8 bytes                      │
+│  bump             u8        1 byte   (Campaign PDA bump) │
+│  vault_bump       u8        1 byte   (Vault PDA bump)    │
+│  receipt_mint_bump u8       1 byte   (Mint PDA bump)     │
 ├──────────────────────────────────────────────────────────┤
-│  Total (10 milestones): ~93 bytes                        │
-│  Anchor space allocation:  8 + 32 + 8 + 8 + 8 + 8       │
-│    + 1 + 1 + (4+10) + 1 + 1 + 1 + 1 = 93 bytes          │
-│  Recommended alloc with headroom: 128 bytes              │
+│  Data (excl. discriminator): 161 bytes                   │
+│  Total (with discriminator): 169 bytes                   │
+│  Anchor space allocation: 256 bytes (headroom)           │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -314,11 +316,11 @@ values and eliminates a class of bump-grinding attacks.
 
 | Operation | EVM actor | Solana actor | Guard |
 |-----------|-----------|--------------|-------|
-| `createCampaign` / `create_campaign` | Deployer (constructor) | Any signer (becomes creator) | `softCap < hardCap`, `deadline > now`, `sum(milestones) == 100` |
-| `fund` | Any address | Any signer | `!finalized`, `timestamp <= deadline`, `totalRaised + amount <= hardCap` |
-| `finalize` / `finalize_campaign` | Anyone (permissionless) | Anyone (permissionless) | `timestamp > deadline`, `!finalized` |
+| `createCampaign` / `initialize_campaign` | Deployer (constructor) | Any signer (becomes creator) | `softCap < hardCap`, `deadline > now`, `sum(milestones) == 100` |
+| `contribute` / `contribute` | Any address | Any signer | `!finalized`, `timestamp <= deadline`, `totalRaised + amount <= hardCap` |
+| `finalize` / `finalize` | Anyone (permissionless) | Anyone (permissionless) | `timestamp > deadline`, `!finalized` |
 | `withdrawMilestone` / `withdraw_milestone` | `msg.sender == creator` | `ctx.accounts.creator.key() == campaign.creator` | `success == true`, `currentMilestone < milestones.len()` |
-| `refund` / `claim_refund` | `msg.sender` with `contributions[msg.sender] > 0` | Any signer with valid ContributorRecord | `success == false`, `finalized == true`, `amount > 0` |
+| `refund` / `refund` | `msg.sender` with `contributions[msg.sender] > 0` | Any signer with valid ContributorRecord | `success == false`, `finalized == true`, `amount > 0` |
 
 > **Permissionless finalize**: Anyone can trigger finalization after the deadline. This is a
 > deliberate design choice — it prevents the creator from blocking fund recovery by refusing to
@@ -330,12 +332,12 @@ values and eliminates a class of bump-grinding attacks.
 
 These invariants must hold at all times. Each is enforced at the listed point.
 
-1. **totalRaised ≤ hardCap** — enforced in `fund`; contribution reverts if it would exceed `hardCap`.
+1. **totalRaised ≤ hardCap** — enforced in `contribute`; contribution reverts if it would exceed `hardCap`.
 2. **finalized is write-once** — enforced by `require(!finalized)` at the top of `finalize`; once set, it cannot be unset.
 3. **success and failure are mutually exclusive** — `success` is set exactly once inside `finalize` based on `totalRaised >= softCap`; cannot be changed afterwards.
 4. **milestone percentages sum to 100** — enforced at campaign creation; custom error `MilestonePercentageError` on both platforms.
 5. **contributions[caller] zeroed before transfer on refund** — CEI (checks-effects-interactions) pattern; prevents reentrancy on EVM; prevents double-claim on Solana.
-6. **last milestone uses balance sweep** — the final `withdrawMilestone` transfers `address(this).balance` (EVM) / all remaining lamports in Campaign PDA (Solana) rather than computing `totalRaised * pct / 100`, preventing dust accumulation from integer division.
+6. **last milestone uses balance sweep** — the final `withdrawMilestone` transfers the full remaining payment token balance (EVM: `paymentToken.balanceOf(address(this))`; Solana: remaining SPL vault balance) rather than computing `totalRaised * pct / 100`, preventing dust accumulation from integer division.
 
 ---
 
@@ -343,8 +345,8 @@ These invariants must hold at all times. Each is enforced at the listed point.
 
 | Scenario | Expected behaviour | Guard location |
 |----------|--------------------|---------------|
-| Contribution at exactly `hardCap` | Accepted; subsequent contributions rejected | `fund` function |
-| Contribution would exceed `hardCap` | Entire transaction reverts; no partial fills | `fund` function |
+| Contribution at exactly `hardCap` | Accepted; subsequent contributions rejected | `contribute` function |
+| Contribution would exceed `hardCap` | Entire transaction reverts; no partial fills | `contribute` function |
 | `finalize` called before `deadline` | Reverts with `DeadlineNotReached` | `finalize` function |
 | `finalize` called twice | Second call reverts with `AlreadyFinalized` | `finalize` function |
 | `withdrawMilestone` called after last milestone | Reverts with `NoMoreMilestones` | `withdrawMilestone` function |
@@ -352,7 +354,7 @@ These invariants must hold at all times. Each is enforced at the listed point.
 | `refund` called twice by same contributor | Second call reverts (contribution zeroed on first call) | CEI pattern in `refund` |
 | `softCap == hardCap` | Valid; campaign succeeds exactly at cap or fails | Creation guard: `softCap <= hardCap` |
 | Single-milestone campaign (`[100]`) | Last-milestone sweep applies on first withdrawal | `withdrawMilestone` function |
-| `deadline` in the past at construction | Reverts with `InvalidDeadline` | Construction / `create_campaign` |
+| `deadline` in the past at construction | Reverts with `InvalidDeadline` | Construction / `initialize_campaign` |
 
 ---
 
@@ -374,11 +376,15 @@ Anchor emits structured logs via the `emit!` macro (on-chain CPI event log).
 
 | Event struct | Fields | Emitted in |
 |-------------|--------|-----------|
-| `CampaignCreated` | `campaign`, `creator`, `soft_cap`, `hard_cap`, `deadline` | `create_campaign` |
-| `Funded` | `campaign`, `contributor`, `amount`, `total_raised` | `fund` |
-| `Finalized` | `campaign`, `success`, `total_raised` | `finalize_campaign` |
+| `CampaignCreated` | `campaign`, `creator`, `soft_cap`, `hard_cap`, `deadline` | `initialize_campaign` |
+| `Contributed` | `campaign`, `contributor`, `amount`, `total_raised` | `contribute` |
+| `Finalized` | `campaign`, `success`, `total_raised` | `finalize` |
 | `MilestoneWithdrawn` | `campaign`, `milestone_index`, `amount` | `withdraw_milestone` |
-| `RefundClaimed` | `campaign`, `contributor`, `amount` | `claim_refund` |
+| `Refunded` | `campaign`, `contributor`, `amount` | `refund` |
+
+> **Note:** Solana program events are planned but not yet implemented. The Anchor program
+> currently does not emit structured events via `emit!`. The table above documents the intended
+> event surface for parity with EVM. Event emission will be added in a follow-up commit.
 
 ---
 
@@ -397,7 +403,7 @@ Anchor emits structured logs via the `emit!` macro (on-chain CPI event log).
 
 | | Detail |
 |-|--------|
-| **Decision** | Anyone can call `finalize` / `finalize_campaign` after the deadline |
+| **Decision** | Anyone can call `finalize` after the deadline (both EVM and Solana) |
 | **Options considered** | (A) Creator-only finalize; (B) Permissionless finalize |
 | **Tradeoffs** | Creator-only: simpler mental model, but creator can block fund recovery indefinitely. Permissionless: slight griefing surface (gas cost of finalize falls on caller), but enables trustless recovery |
 | **Why chosen** | Contributor fund safety takes priority. A creator who refuses to finalize would leave contributor funds locked; permissionless finalize eliminates this attack. The gas cost of finalize is bounded and small. Both EVM and Solana implement this consistently |

@@ -18,10 +18,10 @@ export function printResult(output: TxOutput): void {
   console.log(JSON.stringify(output, bigIntReplacer, 2));
 }
 
-export function printError(operation: string, err: unknown): void {
+export function printError(operation: string, err: unknown, chain: "evm" | "solana" = "evm"): void {
   const message = err instanceof Error ? err.message : String(err);
   const output: TxOutput = {
-    chain: "evm",
+    chain,
     operation,
     txHash: null,
     blockNumber: null,

@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import BN from "bn.js";
 import {
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
@@ -9,6 +9,7 @@ import {
   connection,
   wallet,
   program,
+  sendAndConfirmTx,
   paymentMint,
   SOLANA_CAMPAIGN_ADDRESS,
   SOLANA_CAMPAIGN_ID,
@@ -30,7 +31,7 @@ async function main() {
   } else if (SOLANA_CAMPAIGN_ADDRESS) {
     campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
   } else {
-    campaignAddr = campaignPda(wallet.publicKey, new anchor.BN(Number(SOLANA_CAMPAIGN_ID)));
+    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
   }
 
   const vault = vaultPda(campaignAddr);
@@ -40,20 +41,21 @@ async function main() {
 
   const start = performance.now();
 
-  const sig = await program.methods
-    .refund()
-    .accounts({
-      contributor: wallet.publicKey,
-      campaign: campaignAddr,
-      contributorPaymentAta,
-      contributorReceiptAta,
-      vault,
-      receiptMint,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    } as any)
-    .signers([wallet])
-    .rpc({ commitment: "confirmed", skipPreflight: true });
+  const sig = await sendAndConfirmTx(
+    program.methods
+      .refund()
+      .accounts({
+        contributor: wallet.publicKey,
+        campaign: campaignAddr,
+        contributorPaymentAta,
+        contributorReceiptAta,
+        vault,
+        receiptMint,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      } as any)
+      .signers([wallet]),
+  );
 
   const elapsed = performance.now() - start;
 
@@ -78,4 +80,4 @@ async function main() {
   });
 }
 
-main().catch((err) => printError("refund", err));
+main().catch((err) => printError("refund", err, "solana"));

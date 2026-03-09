@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { PublicKey } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import BN from "bn.js";
 import {
   connection,
   wallet,
@@ -29,7 +29,7 @@ async function main() {
   } else if (SOLANA_CAMPAIGN_ADDRESS) {
     campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
   } else {
-    campaignAddr = campaignPda(wallet.publicKey, new anchor.BN(Number(SOLANA_CAMPAIGN_ID)));
+    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
   }
 
   const campaignAccount = await (program.account as any).campaign.fetch(campaignAddr);
@@ -79,4 +79,4 @@ async function main() {
   });
 }
 
-main().catch((err) => printError("status", err));
+main().catch((err) => printError("status", err, "solana"));

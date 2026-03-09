@@ -1,10 +1,11 @@
 import { parseArgs } from "node:util";
 import { PublicKey } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import BN from "bn.js";
 import {
   connection,
   wallet,
   program,
+  sendAndConfirmTx,
   SOLANA_CAMPAIGN_ADDRESS,
   SOLANA_CAMPAIGN_ID,
 } from "./config.js";
@@ -25,19 +26,20 @@ async function main() {
   } else if (SOLANA_CAMPAIGN_ADDRESS) {
     campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
   } else {
-    campaignAddr = campaignPda(wallet.publicKey, new anchor.BN(Number(SOLANA_CAMPAIGN_ID)));
+    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
   }
 
   const start = performance.now();
 
-  const sig = await program.methods
-    .finalize()
-    .accounts({
-      caller: wallet.publicKey,
-      campaign: campaignAddr,
-    } as any)
-    .signers([wallet])
-    .rpc({ commitment: "confirmed", skipPreflight: true });
+  const sig = await sendAndConfirmTx(
+    program.methods
+      .finalize()
+      .accounts({
+        caller: wallet.publicKey,
+        campaign: campaignAddr,
+      } as any)
+      .signers([wallet]),
+  );
 
   const elapsed = performance.now() - start;
 
@@ -66,4 +68,4 @@ async function main() {
   });
 }
 
-main().catch((err) => printError("finalize", err));
+main().catch((err) => printError("finalize", err, "solana"));

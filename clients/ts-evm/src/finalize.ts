@@ -8,6 +8,26 @@ import {
 import { printResult, printError } from "./output.js";
 
 async function main() {
+  // Read campaign deadline and advance time past it (Hardhat localnet only)
+  const deadline = (await publicClient.readContract({
+    address: CAMPAIGN_ADDRESS,
+    abi: CAMPAIGN_ABI,
+    functionName: "deadline",
+  })) as bigint;
+
+  const block = await publicClient.getBlock();
+  if (block.timestamp <= deadline) {
+    const secondsToAdvance = Number(deadline - block.timestamp) + 1;
+    await publicClient.request({
+      method: "evm_increaseTime" as any,
+      params: [secondsToAdvance] as any,
+    });
+    await publicClient.request({
+      method: "evm_mine" as any,
+      params: [] as any,
+    });
+  }
+
   const start = performance.now();
 
   const hash = await walletClient.writeContract({
@@ -31,7 +51,7 @@ async function main() {
           topics: log.topics,
         });
         if (event.eventName === "Finalized") {
-          const args = event.args as { successful: boolean; totalRaised: bigint };
+          const args = event.args as unknown as { successful: boolean; totalRaised: bigint };
           successful = args.successful;
           totalRaised = args.totalRaised.toString();
           break;

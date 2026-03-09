@@ -3,6 +3,7 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import fs from "node:fs";
+import os from "node:os";
 import idlJson from "../../idl/crowdfunding.json" with { type: "json" };
 
 // ── Env validation ──────────────────────────────────────────────────────────
@@ -27,7 +28,10 @@ export const SOLANA_CAMPAIGN_ID = process.env["SOLANA_CAMPAIGN_ID"] ?? "0";
 
 export const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-const keypairData = JSON.parse(fs.readFileSync(SOLANA_KEYPAIR_PATH, "utf-8"));
+const resolvedKeypairPath = SOLANA_KEYPAIR_PATH.startsWith("~")
+  ? SOLANA_KEYPAIR_PATH.replace("~", os.homedir())
+  : SOLANA_KEYPAIR_PATH;
+const keypairData = JSON.parse(fs.readFileSync(resolvedKeypairPath, "utf-8"));
 export const wallet = Keypair.fromSecretKey(Uint8Array.from(keypairData));
 
 export const programId = new PublicKey(SOLANA_PROGRAM_ID);
@@ -47,3 +51,25 @@ export const program = new Program(idlJson as any, provider);
 // ── Token decimals ──────────────────────────────────────────────────────────
 
 export const DECIMALS = 6;
+
+// ── RPC helper (works around SendTransactionError constructor mismatch) ─────
+
+export async function sendAndConfirmTx(
+  builder: { transaction(): Promise<import("@solana/web3.js").Transaction> },
+): Promise<string> {
+  const tx = await builder.transaction();
+  tx.feePayer = wallet.publicKey;
+  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  tx.sign(wallet);
+
+  const simResult = await connection.simulateTransaction(tx);
+  if (simResult.value.err) {
+    const logs = simResult.value.logs?.join("\n") ?? "";
+    const anchorMsg = logs.match(/Error Message: (.+)/)?.[1] ?? JSON.stringify(simResult.value.err);
+    throw new Error(anchorMsg);
+  }
+
+  const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+  await connection.confirmTransaction(sig, "confirmed");
+  return sig;
+}

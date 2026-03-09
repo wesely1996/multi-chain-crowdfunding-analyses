@@ -1,0 +1,32 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "clients", "clients", "{9123F88B-E531-3118-42D7-ED8CEF4BD00E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "dotnet", "dotnet", "{85F27C6A-2B5B-DBF6-E11C-F59BFA06573F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrowdfundingClient", "clients\dotnet\CrowdfundingClient.csproj", "{89D62CC3-31B0-11BD-02A9-84E89C0D4BF9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{89D62CC3-31B0-11BD-02A9-84E89C0D4BF9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{89D62CC3-31B0-11BD-02A9-84E89C0D4BF9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{89D62CC3-31B0-11BD-02A9-84E89C0D4BF9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{89D62CC3-31B0-11BD-02A9-84E89C0D4BF9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{85F27C6A-2B5B-DBF6-E11C-F59BFA06573F} = {9123F88B-E531-3118-42D7-ED8CEF4BD00E}
+		{89D62CC3-31B0-11BD-02A9-84E89C0D4BF9} = {85F27C6A-2B5B-DBF6-E11C-F59BFA06573F}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {CFD4A0E9-6396-4289-B4C3-BAAD307BFB13}
+	EndGlobalSection
+EndGlobal

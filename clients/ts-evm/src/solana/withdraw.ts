@@ -1,11 +1,12 @@
 import { parseArgs } from "node:util";
 import { PublicKey } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import BN from "bn.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   connection,
   wallet,
   program,
+  sendAndConfirmTx,
   paymentMint,
   SOLANA_CAMPAIGN_ADDRESS,
   SOLANA_CAMPAIGN_ID,
@@ -27,7 +28,7 @@ async function main() {
   } else if (SOLANA_CAMPAIGN_ADDRESS) {
     campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
   } else {
-    campaignAddr = campaignPda(wallet.publicKey, new anchor.BN(Number(SOLANA_CAMPAIGN_ID)));
+    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
   }
 
   const vault = vaultPda(campaignAddr);
@@ -40,18 +41,19 @@ async function main() {
   const start = performance.now();
 
   // creator must be explicitly passed despite `relations` annotation (Anchor 0.32 bug)
-  const sig = await program.methods
-    .withdrawMilestone()
-    .accounts({
-      creator: wallet.publicKey,
-      campaign: campaignAddr,
-      vault,
-      creatorPaymentAta,
-      paymentMint,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    } as any)
-    .signers([wallet])
-    .rpc({ commitment: "confirmed", skipPreflight: true });
+  const sig = await sendAndConfirmTx(
+    program.methods
+      .withdrawMilestone()
+      .accounts({
+        creator: wallet.publicKey,
+        campaign: campaignAddr,
+        vault,
+        creatorPaymentAta,
+        paymentMint,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+      .signers([wallet]),
+  );
 
   const elapsed = performance.now() - start;
 
@@ -81,4 +83,4 @@ async function main() {
   });
 }
 
-main().catch((err) => printError("withdraw", err));
+main().catch((err) => printError("withdraw", err, "solana"));

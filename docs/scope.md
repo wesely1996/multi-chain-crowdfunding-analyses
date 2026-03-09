@@ -150,6 +150,9 @@ Any deviation from these versions must be documented in `docs/measurements.md`.
 | Anchor CLI | 0.32.1 | Build, test, deploy orchestration |
 | `anchor-lang` | 0.32.1 | Solana program framework |
 | `anchor-spl` | 0.32.1 | SPL Token CPI helpers |
+| `@coral-xyz/anchor` (TS) | 0.30.1 | TS client Anchor SDK |
+| `@solana/web3.js` | 1.95.4 | Solana RPC and transaction building |
+| viem | 2.21.x | EVM client RPC and contract interaction |
 
 ### 7.2 Localnet Rationale
 
@@ -181,7 +184,7 @@ succeeds, yield flows to the creator.
 
 The architecture is extensible to this variant: the ERC-20 `receiptToken` field in the singleton
 contract can be replaced by an ERC-4626 `vault` reference. The lifecycle state machine is
-identical; only the `fund` and `refund` functions change.
+identical; only the `contribute` and `refund` functions change.
 
 ### 8.2 ERC-1155 — Tier-Based Campaigns (Thesis Variant 3)
 

@@ -1,8 +1,8 @@
 import { PublicKey } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import BN from "bn.js";
 import { programId } from "./config.js";
 
-export function campaignPda(creator: PublicKey, campaignId: anchor.BN): PublicKey {
+export function campaignPda(creator: PublicKey, campaignId: BN): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
     [Buffer.from("campaign"), creator.toBuffer(), campaignId.toArrayLike(Buffer, "le", 8)],
     programId,

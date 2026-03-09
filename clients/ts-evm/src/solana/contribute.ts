@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import BN from "bn.js";
 import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -10,6 +10,7 @@ import {
   connection,
   wallet,
   program,
+  sendAndConfirmTx,
   paymentMint,
   SOLANA_CAMPAIGN_ADDRESS,
   SOLANA_CAMPAIGN_ID,
@@ -27,7 +28,7 @@ const { values } = parseArgs({
 });
 
 async function main() {
-  const amountRaw = new anchor.BN(Math.round(Number(values["amount"]!) * 10 ** DECIMALS));
+  const amountRaw = new BN(Math.round(Number(values["amount"]!) * 10 ** DECIMALS));
 
   let campaignAddr: PublicKey;
   if (values["campaign"]) {
@@ -35,7 +36,7 @@ async function main() {
   } else if (SOLANA_CAMPAIGN_ADDRESS) {
     campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
   } else {
-    campaignAddr = campaignPda(wallet.publicKey, new anchor.BN(Number(SOLANA_CAMPAIGN_ID)));
+    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
   }
 
   const vault = vaultPda(campaignAddr);
@@ -45,27 +46,28 @@ async function main() {
 
   const start = performance.now();
 
-  const sig = await program.methods
-    .contribute(amountRaw)
-    .accounts({
-      contributor: wallet.publicKey,
-      campaign: campaignAddr,
-      contributorPaymentAta,
-      vault,
-      contributorReceiptAta,
-      receiptMint,
-      paymentMint,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-      rent: SYSVAR_RENT_PUBKEY,
-    } as any)
-    .signers([wallet])
-    .rpc({ commitment: "confirmed", skipPreflight: true });
+  const sig = await sendAndConfirmTx(
+    program.methods
+      .contribute(amountRaw)
+      .accounts({
+        contributor: wallet.publicKey,
+        campaign: campaignAddr,
+        contributorPaymentAta,
+        vault,
+        contributorReceiptAta,
+        receiptMint,
+        paymentMint,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: SYSVAR_RENT_PUBKEY,
+      } as any)
+      .signers([wallet]),
+  );
 
   const elapsed = performance.now() - start;
 
-  const tx = await connection.getTransaction(sig, {
+  const txInfo = await connection.getTransaction(sig, {
     commitment: "confirmed",
     maxSupportedTransactionVersion: 0,
   });
@@ -74,9 +76,9 @@ async function main() {
     chain: "solana",
     operation: "contribute",
     txHash: sig,
-    blockNumber: tx?.slot ?? null,
-    gasUsed: tx?.meta?.fee ?? null,
-    status: tx?.meta?.err ? "reverted" : "success",
+    blockNumber: txInfo?.slot ?? null,
+    gasUsed: txInfo?.meta?.fee ?? null,
+    status: txInfo?.meta?.err ? "reverted" : "success",
     timestamp: new Date().toISOString(),
     elapsedMs: Math.round(elapsed),
     data: {
@@ -86,4 +88,4 @@ async function main() {
   });
 }
 
-main().catch((err) => printError("contribute", err));
+main().catch((err) => printError("contribute", err, "solana"));
