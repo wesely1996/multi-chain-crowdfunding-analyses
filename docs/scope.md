@@ -32,10 +32,11 @@ the controlled baseline, which are planned extensions, and what is intentionally
 | 1 | ERC-20 receipt token per campaign | EVM | ERC-20 | **MVP** | Simplest EVM token standard; direct counterpart to SPL |
 | 2 | ERC-4626 vault shares | EVM | ERC-4626 | Planned | Yield mechanics require external DeFi protocol integration |
 | 3 | ERC-1155 tier rewards | EVM | ERC-1155 | Planned | Multi-token IDs add complexity orthogonal to core lifecycle |
-| 4 | SPL + Token-2022 | Solana | SPL / Token-2022 | **MVP** (SPL only) | Token-2022 extensions planned as variant 4 extension |
+| 4 | SPL Token (classic) | Solana | SPL | **MVP** | Direct counterpart to ERC-20; classic SPL Token program |
+| 5 | Token-2022 (SPL extensions) | Solana | Token-2022 | Planned | Separate program for side-by-side comparison with V4 |
 
-`[fact]` Variants 1 and 4 (SPL) are the MVP implementations. Variants 2, 3, and Token-2022
-extensions are planned for later thesis milestones and are fully excluded from MVP benchmarks.
+`[fact]` Variants 1 and 4 (SPL) are the MVP implementations. Variants 2, 3, and 5 (Token-2022)
+are planned for later thesis milestones and are fully excluded from MVP benchmarks.
 
 ---
 
@@ -87,7 +88,7 @@ abstraction goals. The benchmark scope and the client architecture scope are dis
 | Stage | TypeScript client | .NET client | Variants supported |
 |-------|------------------|-------------|-------------------|
 | MVP | viem (EVM ERC-20) + Anchor TS (Solana SPL) | Nethereum (EVM ERC-20) + Solana.NET/RPC (Solana SPL) | V1 + V4 (SPL only) |
-| Full thesis scope | Extended to ERC-4626, ERC-1155, and Token-2022 variants | Extended to ERC-4626, ERC-1155, and Token-2022 variants | V1 + V2 + V3 + V4 |
+| Full thesis scope | Extended to ERC-4626, ERC-1155, and Token-2022 variants | Extended to ERC-4626, ERC-1155, and Token-2022 variants | V1 + V2 + V3 + V4 + V5 |
 
 `[recommendation]` Both client layers are designed from the start to be variant-aware. A client's
 absence of support for a planned variant at MVP stage is a temporary implementation-stage
@@ -107,7 +108,7 @@ decision, not an oversight.
 |---------|----------------|----------------------|
 | ERC-4626 vault yield accumulation | Requires external yield protocol integration; would make EVM contract depend on third-party state, breaking controlled comparison | Thesis variant 2; see §8 |
 | ERC-1155 tier-based rewards | Multi-token IDs (one per tier) add account/state complexity orthogonal to crowdfunding lifecycle | Thesis variant 3; see §8 |
-| Token-2022 extensions (transfer hooks, interest-bearing, confidential transfers) | Variable-size extension accounts and additional CPIs confound cost measurements | Thesis variant 4 extension; see §8 |
+| Token-2022 extensions (transfer hooks, interest-bearing, confidential transfers) | Variable-size extension accounts and additional CPIs confound cost measurements | Thesis variant 5; see §8 |
 | Upgradeability / proxy patterns (EVM: EIP-1967 transparent proxy; Solana: BPF upgradeable loader) | Proxy indirection adds deploy/call overhead not present in Solana's native program model; breaks cost symmetry | Not planned — thesis focuses on immutable contracts |
 | On-chain governance (voting, timelock) | Out of scope for crowdfunding lifecycle; would require separate governance token | Not planned |
 | Multi-token reward systems (e.g. NFT + ERC-20 hybrid) | Combines two thesis variants; cannot be cleanly benchmarked as a unit | Not planned in MVP |
@@ -196,17 +197,20 @@ The architecture is extensible: the `milestonePercentages` array becomes per-tie
 `contributions` mapping becomes `contributions[address][tierId]`. The state machine transitions
 are identical.
 
-### 8.3 Token-2022 — SPL Extensions (Thesis Variant 4 Extension)
+### 8.3 Token-2022 — SPL Extensions (Thesis Variant 5)
 
 Token-2022 extends the SPL Token standard with optional extensions attached to mint and token
-accounts. Relevant extensions for crowdfunding include:
+accounts. It is implemented as a **separate Anchor program** (variant 5) alongside the classic
+SPL variant (variant 4), enabling direct side-by-side comparison of costs, fees, and DX.
+Relevant extensions for crowdfunding include:
 
 - **Transfer fee**: automatically deduct a platform fee on each contribution transfer.
 - **Interest-bearing**: accrue interest on held tokens, enabling yield-like semantics without
   an external vault.
 - **Confidential transfers**: hide contribution amounts using ElGamal encryption (zero-knowledge).
 
-The Solana architecture is extensible: replacing `anchor-spl`'s `Token` program reference with
-`Token2022` and adding extension initialisation instructions is the primary change. Account
-sizes become variable (extension data appended to mint/token accounts), which is the main
-engineering complexity increase relative to the SPL MVP.
+The Solana architecture supports this as a separate program (V5): a new Anchor program uses
+`anchor-spl`'s `Token2022` program type instead of `Token`, with extension initialisation
+instructions added where needed. Account sizes become variable (extension data appended to
+mint/token accounts), which is the main engineering complexity increase relative to the SPL
+variant (V4). Both programs coexist in the workspace for side-by-side benchmarking.

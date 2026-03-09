@@ -113,7 +113,7 @@ from the previous transaction's access list. [assumption]
 
 ---
 
-## V4 — Solana / SPL + Token-2022
+## V4 — Solana / SPL Token (classic)
 
 ### M-V4-1 · Localnet (solana-test-validator) — Fee & Latency Benchmark
 
@@ -213,6 +213,14 @@ substantially higher throughput but is out of scope for this controlled comparis
 > **Status: pending.**
 > Expected additional columns: `slot confirmation latency (s)`, `prioritization fee (lamports)`,
 > `cost (USD at time of measurement)`, `CU consumed per instruction`.
+
+---
+
+## V5 — Solana / Token-2022
+
+> **Status: pending.** V5 is a separate Anchor program using the Token-2022 program instead of
+> classic SPL Token. Benchmarks will follow the same methodology as V4 (50 sequential contributions,
+> fee/latency/throughput) to enable direct comparison between SPL Token and Token-2022 on Solana.
 
 ---
 

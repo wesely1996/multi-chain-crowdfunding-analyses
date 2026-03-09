@@ -26,7 +26,8 @@ Init → Funding (softCap, hardCap, deadline) → Finalize → Success (withdraw
 | 1 | EVM – Receipt tokens per campaign | ERC-20 | MVP |
 | 2 | EVM – Vault shares with on-chain yield | ERC-4626 | Planned |
 | 3 | EVM – Tier-based campaigns | ERC-1155 | Planned |
-| 4 | Solana – Native program | SPL + Token-2022 | MVP |
+| 4 | Solana – SPL Token (classic) | SPL | MVP |
+| 5 | Solana – Token-2022 (SPL extensions) | Token-2022 | Planned |
 
 ## Repository Structure
 

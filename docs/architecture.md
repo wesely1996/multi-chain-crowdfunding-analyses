@@ -133,12 +133,12 @@ implementation-stage limitation, not the intended final design.
 | Stage | TypeScript client | .NET client |
 |-------|-----------------|-------------|
 | MVP (V1 ERC-20 + V4 SPL) | viem — EVM ERC-20; Anchor TS + @solana/web3.js — Solana SPL | Nethereum — EVM ERC-20; Solana.NET / JSON-RPC — Solana SPL |
-| Full thesis scope (V1–V4) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana |
+| Full thesis scope (V1–V5) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana (V5) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana (V5) |
 
 > **Design intent**: Both client layers — TypeScript and .NET — are intended to support every
 > variant that exists at the current implementation stage. In the MVP this means both clients
 > cover the two baseline implementations only (EVM ERC-20 and Solana SPL). In the full thesis
-> scope both clients are extended to cover all four variants. The current repository layout
+> scope both clients are extended to cover all five variants. The current repository layout
 > (`clients/ts-evm/` and `clients/dotnet/`) reflects the MVP stage and will evolve.
 
 ### 4a.2 Canonical Client Operations
@@ -412,10 +412,10 @@ Anchor emits structured logs via the `emit!` macro (on-chain CPI event log).
 
 | | Detail |
 |-|--------|
-| **Decision** | SPL Token (classic) for the MVP; Token-2022 in scope for thesis variant 4 |
-| **Options considered** | (A) SPL Token — mature, universal wallet support; (B) Token-2022 — transfer hooks, confidential transfers, interest-bearing extensions |
-| **Tradeoffs** | SPL Token: maximum tooling compatibility, no extension complexity, Anchor 0.32.1 has first-class support. Token-2022: enables richer receipt token mechanics but adds account size variability and extension CPI complexity that would confound the MVP comparison |
-| **Why chosen** | The MVP comparison must isolate platform differences, not feature differences. SPL Token is the direct counterpart of a plain ERC-20. Token-2022 extensions are a separate thesis variant and will be analysed independently |
+| **Decision** | SPL Token (classic) for the MVP (V4); Token-2022 as a separate program (V5) for comparison |
+| **Options considered** | (A) SPL Token — mature, universal wallet support; (B) Token-2022 — transfer hooks, confidential transfers, interest-bearing extensions; (C) Combined SPL + Token-2022 in one program |
+| **Tradeoffs** | SPL Token: maximum tooling compatibility, no extension complexity, Anchor 0.32.1 has first-class support. Token-2022: enables richer receipt token mechanics but adds account size variability and extension CPI complexity. Separate programs enable clean side-by-side benchmarking |
+| **Why chosen** | The MVP comparison must isolate platform differences, not feature differences. SPL Token is the direct counterpart of a plain ERC-20. Token-2022 is implemented as a separate variant (V5) so both Solana programs can be benchmarked and compared independently |
 
 ### D4 — Canonical Function Naming
 
