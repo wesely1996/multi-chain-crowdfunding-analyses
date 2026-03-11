@@ -223,7 +223,7 @@ def throughput_solana() -> dict:
         wallet = Wallet(payer)
         provider = Provider(client, wallet)
 
-        with open(config.SOLANA_IDL_PATH) as fh:
+        with open(config.SOLANA_PY_IDL_PATH) as fh:
             idl = Idl.from_json(fh.read())
 
         program_id = Pubkey.from_string(config.SOLANA_PROGRAM_ID)

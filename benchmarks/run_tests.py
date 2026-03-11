@@ -448,8 +448,7 @@ def run_solana() -> dict:
         wallet = Wallet(payer)
         provider = Provider(client, wallet)
         idl = _load_python_idl()
-        from solders.pubkey import Pubkey as PubkeyT
-        program_id = PubkeyT.from_string(config.SOLANA_PROGRAM_ID)
+        program_id = Pubkey.from_string(config.SOLANA_PROGRAM_ID)
         return Program(idl, program_id, provider), program_id
 
     async def _run() -> dict:
@@ -482,8 +481,8 @@ def run_solana() -> dict:
             return 0
 
         # ── Helper: find PDA ─────────────────────────────────────────────────
-        def _find_pda(seeds: list[bytes]) -> PubkeyT:
-            pda, _ = PubkeyT.find_program_address(seeds, program_id)
+        def _find_pda(seeds: list[bytes]) -> Pubkey:
+            pda, _ = Pubkey.find_program_address(seeds, program_id)
             return pda
 
         # ── Phase 1: create payment mint (setup, not timed) ─────────────────
@@ -519,18 +518,26 @@ def run_solana() -> dict:
         creator_kp = Keypair()
         contributors = [Keypair() for _ in range(config.N_CONTRIBUTIONS)]
         await client.request_airdrop(creator_kp.pubkey(), 5_000_000_000)
-        for c in contributors:
-            await client.request_airdrop(c.pubkey(), 2_000_000_000)
-        await asyncio.sleep(3)
+        # Airdrop in batches of 10 with confirmation pauses to avoid blockhash expiry
+        for batch_start in range(0, len(contributors), 10):
+            batch = contributors[batch_start:batch_start + 10]
+            for c in batch:
+                await client.request_airdrop(c.pubkey(), 2_000_000_000)
+            await asyncio.sleep(2)
+        await asyncio.sleep(2)
 
         # Pre-create contributor payment ATAs and mint tokens
         # WHY: setup outside timed loop so it does not skew TPS measurement
         print("[solana] Pre-creating ATAs and minting tokens...")
-        payment_ata_addrs: list[PubkeyT] = []
-        for c in contributors:
+        skip_opts = TxOpts(skip_confirmation=False, skip_preflight=True)
+        payment_ata_addrs: list[Pubkey] = []
+        for i, c in enumerate(contributors):
             ata = await payment_mint.create_account(c.pubkey())
-            await payment_mint.mint_to(ata, payer, config.CONTRIB_AMOUNT, opts=TxOpts(skip_confirmation=False))
+            await payment_mint.mint_to(ata, payer, config.CONTRIB_AMOUNT, opts=skip_opts)
             payment_ata_addrs.append(ata)
+            if (i + 1) % 10 == 0:
+                print(f"  ATAs: {i + 1} / {config.N_CONTRIBUTIONS}")
+                await asyncio.sleep(1)
         await asyncio.sleep(1)
 
         # ── Phase 2: initialize_campaign (SUCCESS) ───────────────────────────
@@ -546,10 +553,7 @@ def run_solana() -> dict:
 
         deadline_ts = int(_time.time()) + config.DEADLINE_DAYS * 86400
 
-        from anchorpy.program.namespace.instruction import _accounts_to_ix_tag  # noqa: F401
-        # WHY: use program.rpc namespace — equivalent to TS .rpc() call
         from solders.system_program import ID as SYSTEM_PROGRAM_ID
-        from spl.token.constants import TOKEN_PROGRAM_ID
 
         # Build accounts dict for initialize_campaign
         init_accounts = {
@@ -576,7 +580,7 @@ def run_solana() -> dict:
 
         # Pre-create receipt ATAs for all contributors
         print("[solana] Pre-creating receipt ATAs...")
-        receipt_ata_addrs: list[PubkeyT] = []
+        receipt_ata_addrs: list[Pubkey] = []
         receipt_spl = SPLAsyncToken(client, receipt_mint_pda, TOKEN_PROGRAM_ID, payer)
         for c in contributors:
             ata = await receipt_spl.create_account(c.pubkey())

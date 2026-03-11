@@ -59,6 +59,7 @@ dist/
 
 # ── Environment / secrets ─────────────────────────────────────────────────────
 .env
+.venv-wsl/
 .env.*
 !.env.example
 *.key
