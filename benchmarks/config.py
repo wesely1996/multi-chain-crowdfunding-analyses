@@ -30,6 +30,41 @@ import pathlib
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
+# Run identity — variant and client under test
+# ---------------------------------------------------------------------------
+
+# VARIANT selects which contract variant is being benchmarked.
+# Override with VARIANT env var or --variant CLI arg.
+# V1=ERC-20, V2=ERC-4626, V3=ERC-1155, V4=SPL Token, V5=Token-2022
+VARIANT: str = os.getenv("VARIANT", "V1")
+
+# CLIENT identifies the client library driving the benchmark.
+# Override with CLIENT env var.
+# python | ts | ts-evm | ts-solana | dotnet
+CLIENT: str = os.getenv("CLIENT", "python")
+
+# BENCHMARK_ENV overrides auto-detected environment label.
+# Set to "sepolia", "hardhat-localnet", "solana-localnet", "solana-devnet".
+BENCHMARK_ENV: str = os.getenv("BENCHMARK_ENV", "")
+
+# Human-readable labels for reporting
+VARIANT_LABELS: dict[str, str] = {
+    "V1": "ERC-20 receipt tokens",
+    "V2": "ERC-4626 vault shares",
+    "V3": "ERC-1155 tier tokens",
+    "V4": "SPL Token (classic)",
+    "V5": "Token-2022 extensions",
+}
+
+CLIENT_LABELS: dict[str, str] = {
+    "python": "Python web3.py / anchorpy",
+    "ts": "TypeScript (viem / Anchor TS)",
+    "ts-evm": "TypeScript viem",
+    "ts-solana": "TypeScript Anchor TS",
+    "dotnet": ".NET Nethereum / Solnet",
+}
+
+# ---------------------------------------------------------------------------
 # EVM — Hardhat localnet
 # ---------------------------------------------------------------------------
 
@@ -42,6 +77,14 @@ EVM_ARTIFACTS_DIR: pathlib.Path = REPO_ROOT / "contracts" / "evm" / "artifacts" 
 FACTORY_ARTIFACT  = EVM_ARTIFACTS_DIR / "CrowdfundingFactory.sol" / "CrowdfundingFactory.json"
 CAMPAIGN_ARTIFACT = EVM_ARTIFACTS_DIR / "CrowdfundingCampaign.sol" / "CrowdfundingCampaign.json"
 MOCK_ERC20_ARTIFACT = EVM_ARTIFACTS_DIR / "MockERC20.sol" / "MockERC20.json"
+
+# Variant → (factory_artifact, campaign_artifact, mock_erc20_artifact)
+# V2/V3 entries added when contracts are implemented.
+EVM_VARIANT_ARTIFACTS: dict[str, tuple[pathlib.Path, pathlib.Path, pathlib.Path]] = {
+    "V1": (FACTORY_ARTIFACT, CAMPAIGN_ARTIFACT, MOCK_ERC20_ARTIFACT),
+    # "V2": (EVM_ARTIFACTS_DIR / "CrowdfundingFactoryV2.sol" / "CrowdfundingFactoryV2.json", ...),
+    # "V3": (EVM_ARTIFACTS_DIR / "CrowdfundingFactoryV3.sol" / "CrowdfundingFactoryV3.json", ...),
+}
 
 # Hardhat default mnemonic (deterministic accounts — safe for localnet only)
 # Index 0 = deployer/creator; indices 1..50 = contributors
@@ -86,6 +129,14 @@ SOLANA_PROGRAM_ID: str = os.getenv(
     "4agCFfWuoR6MPGXeAb6cXQTHcWmxvqD29uanxJd4bkXv",
 )
 
+# Variant → (py_idl_path, program_id)
+# V5 entry added when Token-2022 program is implemented.
+SOLANA_VARIANT_ARTIFACTS: dict[str, tuple[pathlib.Path, str]] = {
+    "V4": (SOLANA_PY_IDL_PATH, SOLANA_PROGRAM_ID),
+    # "V5": (REPO_ROOT / "contracts" / "solana" / "target" / "idl" / "crowdfunding_v5.python.json",
+    #        "<V5_PROGRAM_ID>"),
+}
+
 # ---------------------------------------------------------------------------
 # Scenario parameters — identical across both platforms for a fair comparison
 # ---------------------------------------------------------------------------
@@ -112,6 +163,31 @@ SOFT_CAP_REFUND: int = 400 * (10 ** DECIMALS)    # 400 USDC — never reached by
 
 RESULTS_DIR: pathlib.Path = REPO_ROOT / "benchmarks" / "results"
 
-# Raw per-run JSON files land here
+# Legacy raw per-run JSON files (kept for backward compatibility)
 EVM_RAW_RESULTS:    pathlib.Path = RESULTS_DIR / "evm_raw.json"
 SOLANA_RAW_RESULTS: pathlib.Path = RESULTS_DIR / "solana_raw.json"
+
+
+def _infer_env(variant: str) -> str:
+    """Infer environment label from RPC URLs when BENCHMARK_ENV is not set."""
+    v = variant.upper()
+    if v in ("V1", "V2", "V3"):
+        rpc = EVM_RPC_URL
+        if "infura" in rpc or "alchemy" in rpc or "sepolia" in rpc or "11155111" in rpc:
+            return "sepolia"
+        return "hardhat-localnet"
+    else:
+        rpc = SOLANA_RPC_URL
+        if "devnet" in rpc or "api.devnet" in rpc:
+            return "solana-devnet"
+        return "solana-localnet"
+
+
+def results_path(variant: str, client: str, kind: str, env: str | None = None) -> pathlib.Path:
+    """Return canonical result file path.
+
+    kind: "lifecycle" | "throughput"
+    e.g., V1_python_hardhat-localnet_lifecycle.json
+    """
+    resolved_env = env or BENCHMARK_ENV or _infer_env(variant)
+    return RESULTS_DIR / f"{variant}_{client}_{resolved_env}_{kind}.json"

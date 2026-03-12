@@ -1,50 +1,40 @@
 """
-collect_metrics.py — Parse raw JSON results and print a cross-chain comparison table.
+collect_metrics.py — Parse raw JSON results and print cross-chain comparison tables.
 
 Reads
 -----
-  benchmarks/results/evm_raw.json    (produced by run_tests.py --platform evm)
-  benchmarks/results/solana_raw.json (produced by run_tests.py --platform solana)
+  benchmarks/results/*.json   (produced by run_tests.py / throughput_test.py /
+                                run_client_benchmark.py / run_throughput_client.py)
 
-If only one file is present, it prints that platform's table and notes the other
-is missing.
+Supports both schema_version "1" (legacy evm_raw.json / solana_raw.json) and
+schema_version "2" (multi-variant, multi-client canonical files).
 
-Output
-------
-1. Per-operation table with avg/min/max cost and latency for both chains.
-2. Throughput comparison row.
-3. Limitation notices embedded as footnotes.
+Output modes
+------------
+1. --format github   : GitHub-flavoured markdown tables (default)
+2. --format csv      : comma-separated values, one row per (variant, client, env, operation)
+3. --format latex    : LaTeX tabular environment for thesis appendix
 
-Canonical JSON schema expected (per platform)
----------------------------------------------
-{
-  "platform": "EVM|Solana",
-  "variant": "V1-ERC20|V4-SPL",
-  "operations": [
-    {
-      "name": "contribute",
-      "gas_used|compute_units": <int|null>,
-      "cost": "<str>",          -- gas units (EVM) or lamports (Solana)
-      "latency_ms": <int>
-    },
-    ...
-  ],
-  "throughput": {
-    "num_contributions": 50,
-    "total_time_ms": <int>,
-    "tps": <float>
-  }
-}
-
-Run
----
+Usage
+-----
+    # Print all results in results/ dir as github-markdown tables
     python benchmarks/collect_metrics.py
-    python benchmarks/collect_metrics.py --evm path/to/evm.json --solana path/to/sol.json
+
+    # Specify results directory
+    python benchmarks/collect_metrics.py --results-dir benchmarks/results/
+
+    # Output LaTeX to file
+    python benchmarks/collect_metrics.py --format latex --output benchmarks/results/thesis_table.tex
+
+    # Legacy two-file mode (backward compat)
+    python benchmarks/collect_metrics.py --evm path/to/evm_raw.json --solana path/to/solana_raw.json
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import pathlib
 import statistics
@@ -84,7 +74,6 @@ def _validate(data: dict, source: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _ops_by_prefix(operations: list[dict], prefix: str) -> list[dict]:
-    """Return all ops whose name starts with prefix."""
     return [o for o in operations if o["name"].startswith(prefix)]
 
 
@@ -118,38 +107,88 @@ def _fmt(val: Any, unit: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Multi-file loader
+# ---------------------------------------------------------------------------
+
+def _load_result_file(path: pathlib.Path) -> dict | None:
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+        # Normalise schema v1 → v2 fields
+        if "schema_version" not in data:
+            data["schema_version"] = "1"
+        if "variant" not in data:
+            # Infer from platform
+            if data.get("platform") == "EVM":
+                data["variant"] = "V1"
+            elif data.get("platform") == "Solana":
+                data["variant"] = "V4"
+            else:
+                data["variant"] = "unknown"
+        if "client" not in data:
+            data["client"] = "python"
+        if "environment" not in data:
+            data["environment"] = data.get("environment", "unknown")
+        _validate(data, str(path))
+        return data
+    except Exception as exc:
+        print(f"[warn] Skipping {path}: {exc}", file=sys.stderr)
+        return None
+
+
+def load_all_results(results_dir: pathlib.Path) -> list[dict]:
+    """Load all lifecycle JSON files from results_dir, sorted by variant+client+env."""
+    files = sorted(results_dir.glob("*_lifecycle.json"))
+    # Also include legacy evm_raw.json / solana_raw.json if no canonical files found
+    if not files:
+        for legacy in (config.EVM_RAW_RESULTS, config.SOLANA_RAW_RESULTS):
+            if legacy.exists():
+                files.append(legacy)
+    results = []
+    for f in files:
+        data = _load_result_file(f)
+        if data is not None:
+            results.append(data)
+    return results
+
+
+def load_throughput_results(results_dir: pathlib.Path) -> list[dict]:
+    """Load all throughput JSON files from results_dir."""
+    files = sorted(results_dir.glob("*_throughput.json"))
+    results = []
+    for f in files:
+        data = _load_result_file(f)
+        if data is not None:
+            results.append(data)
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Table builders
 # ---------------------------------------------------------------------------
+
+# Operations in canonical lifecycle order
+OP_MAP = [
+    ("contribute",          "contribute"),
+    ("finalize",            "finalize"),
+    ("withdrawMilestone_0", "withdraw_milestone_0"),
+    ("withdrawMilestone_1", "withdraw_milestone_1"),
+    ("withdrawMilestone_2", "withdraw_milestone_2"),
+    ("refund",              "refund"),
+]
+
 
 def _build_operation_rows(
     evm_data: dict | None,
     sol_data: dict | None,
 ) -> tuple[list[list], list[str]]:
-    """
-    Return (rows, headers) for the per-operation comparison table.
-
-    Cost columns:
-      EVM  → gas_used (integer, no fiat without live gas price)
-      Solana → lamports (flat fee)
-    """
     headers = [
         "Operation",
-        "EVM cost (gas)", "EVM cost min/max", "EVM latency ms (avg)",
-        "SOL cost (lam)", "SOL cost min/max", "SOL latency ms (avg)",
+        "EVM cost (gas)", "EVM min/max gas", "EVM latency ms",
+        "SOL cost (lam)", "SOL min/max lam", "SOL latency ms",
     ]
-
-    # Canonical operations to display, in lifecycle order
-    op_map = [
-        ("contribute",          "contribute"),
-        ("finalize",            "finalize"),
-        ("withdrawMilestone_0", "withdraw_milestone_0"),
-        ("withdrawMilestone_1", "withdraw_milestone_1"),
-        ("withdrawMilestone_2", "withdraw_milestone_2"),
-        ("refund",              "refund"),
-    ]
-
     rows = []
-    for evm_name, sol_name in op_map:
+    for evm_name, sol_name in OP_MAP:
         evm_ops = _ops_by_prefix(evm_data["operations"], evm_name) if evm_data else []
         sol_ops = _ops_by_prefix(sol_data["operations"], sol_name) if sol_data else []
 
@@ -159,7 +198,6 @@ def _build_operation_rows(
         sol_lat  = _latency_agg(sol_ops)
 
         n_evm = len(evm_ops)
-        n_sol = len(sol_ops)
         label = evm_name if n_evm > 0 else sol_name
         if n_evm > 1:
             label += f" (N={n_evm})"
@@ -173,14 +211,12 @@ def _build_operation_rows(
             f"{_fmt(sol_cost['min'])} / {_fmt(sol_cost['max'])}",
             _fmt(sol_lat["avg"]),
         ])
-
     return rows, headers
 
 
 def _build_throughput_row(evm_data: dict | None, sol_data: dict | None) -> list:
     evm_tp = evm_data["throughput"] if evm_data else {}
     sol_tp = sol_data["throughput"] if sol_data else {}
-
     return [
         "Throughput (50 tx)",
         f"Total: {_fmt(evm_tp.get('total_time_ms'))} ms",
@@ -192,8 +228,91 @@ def _build_throughput_row(evm_data: dict | None, sol_data: dict | None) -> list:
     ]
 
 
+def _build_multi_client_rows(results: list[dict]) -> tuple[list[list], list[str]]:
+    """Build a table comparing clients for the same variant+environment."""
+    headers = [
+        "Variant", "Client", "Environment",
+        "contribute avg cost", "contribute latency ms",
+        "finalize cost", "TPS",
+    ]
+    rows = []
+    for r in results:
+        variant = r.get("variant", "?")
+        client = r.get("client_label", r.get("client", "?"))
+        env = r.get("environment", "?")
+        platform = r.get("platform", "?")
+        cost_unit = "gas" if platform == "EVM" else "lam"
+
+        contrib_ops = _ops_by_prefix(r["operations"], "contribute")
+        finalize_ops = _ops_by_prefix(r["operations"], "finalize")
+
+        contrib_cost = _cost_agg(contrib_ops)
+        contrib_lat = _latency_agg(contrib_ops)
+        fin_cost = _cost_agg(finalize_ops)
+        tps = r["throughput"].get("tps")
+
+        rows.append([
+            f"{variant} ({config.VARIANT_LABELS.get(variant, '')})",
+            client,
+            env,
+            f"{_fmt(contrib_cost['avg'])} {cost_unit}",
+            f"{_fmt(contrib_lat['avg'])} ms",
+            f"{_fmt(fin_cost['avg'])} {cost_unit}",
+            _fmt(tps),
+        ])
+    return rows, headers
+
+
 # ---------------------------------------------------------------------------
-# Main
+# Format renderers
+# ---------------------------------------------------------------------------
+
+def _render_github(rows: list[list], headers: list[str]) -> str:
+    return tabulate(rows, headers=headers, tablefmt="github")
+
+
+def _render_csv(rows: list[list], headers: list[str]) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(headers)
+    w.writerows(rows)
+    return buf.getvalue()
+
+
+def _render_latex(rows: list[list], headers: list[str], caption: str = "") -> str:
+    col_spec = "l" + "r" * (len(headers) - 1)
+    lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        r"\small",
+        r"\begin{tabular}{" + col_spec + r"}",
+        r"\toprule",
+        " & ".join(f"\\textbf{{{h}}}" for h in headers) + r" \\",
+        r"\midrule",
+    ]
+    for row in rows:
+        lines.append(" & ".join(str(c) for c in row) + r" \\")
+    lines += [
+        r"\bottomrule",
+        r"\end{tabular}",
+    ]
+    if caption:
+        lines.append(f"\\caption{{{caption}}}")
+    lines.append(r"\end{table}")
+    return "\n".join(lines)
+
+
+def _render(rows: list[list], headers: list[str], fmt: str, caption: str = "") -> str:
+    if fmt == "csv":
+        return _render_csv(rows, headers)
+    elif fmt == "latex":
+        return _render_latex(rows, headers, caption)
+    else:
+        return _render_github(rows, headers)
+
+
+# ---------------------------------------------------------------------------
+# Legacy two-file comparison (kept for backward compat)
 # ---------------------------------------------------------------------------
 
 def load_results(evm_path: pathlib.Path, sol_path: pathlib.Path) -> tuple[dict | None, dict | None]:
@@ -205,14 +324,16 @@ def load_results(evm_path: pathlib.Path, sol_path: pathlib.Path) -> tuple[dict |
             evm_data = json.load(fh)
         _validate(evm_data, str(evm_path))
     else:
-        print(f"[warn] EVM results not found at {evm_path}. Run: python benchmarks/run_tests.py --platform evm")
+        print(f"[warn] EVM results not found at {evm_path}. Run: python benchmarks/run_tests.py --platform evm",
+              file=sys.stderr)
 
     if sol_path.exists():
         with open(sol_path) as fh:
             sol_data = json.load(fh)
         _validate(sol_data, str(sol_path))
     else:
-        print(f"[warn] Solana results not found at {sol_path}. Run: python benchmarks/run_tests.py --platform solana")
+        print(f"[warn] Solana results not found at {sol_path}. Run: python benchmarks/run_tests.py --platform solana",
+              file=sys.stderr)
 
     if evm_data is None and sol_data is None:
         sys.exit("[error] No results found. Run run_tests.py first.")
@@ -220,20 +341,18 @@ def load_results(evm_path: pathlib.Path, sol_path: pathlib.Path) -> tuple[dict |
     return evm_data, sol_data
 
 
-def print_comparison(evm_data: dict | None, sol_data: dict | None) -> None:
+def print_comparison(evm_data: dict | None, sol_data: dict | None, fmt: str = "github") -> None:
     print("\n" + "=" * 100)
     print("CROSS-CHAIN BENCHMARK COMPARISON — MVP Baseline")
     evm_variant = evm_data.get("variant", "EVM")   if evm_data else "EVM (no data)"
     sol_variant = sol_data.get("variant", "Solana") if sol_data else "Solana (no data)"
-    print(f"  {evm_variant} (Hardhat localnet)  vs.  {sol_variant} (solana-test-validator localnet)")
+    print(f"  {evm_variant}  vs.  {sol_variant}")
     print("=" * 100)
 
     rows, headers = _build_operation_rows(evm_data, sol_data)
     rows.append(_build_throughput_row(evm_data, sol_data))
+    print(_render(rows, headers, fmt, caption="Cross-chain operation comparison"))
 
-    print(tabulate(rows, headers=headers, tablefmt="github"))
-
-    # ── Structured JSON summary (machine-readable) ───────────────────────────
     summary = {
         "evm": evm_data,
         "solana": sol_data,
@@ -251,35 +370,113 @@ def print_comparison(evm_data: dict | None, sol_data: dict | None) -> None:
         json.dump(summary, fh, indent=2)
     print(f"\n[output] Structured summary: {summary_path}")
 
-    # ── Footnotes ─────────────────────────────────────────────────────────────
     print()
     print("Footnotes")
     print("---------")
     print("(1) Hardhat automines instantly. EVM latency = local execution time only.")
-    print("    Propagation / mempool wait is not captured. Re-run on Sepolia for real latency.")
     print("(2) solana-test-validator is single-threaded. TPS does not represent production.")
-    print("    Re-run on devnet for a representative latency figure.")
-    print("(3) EVM gas costs vary: first tx has cold SSTORE penalties (~+51 k gas).")
-    print("    avg/min/max spread reflects SSTORE zero→nonzero vs nonzero→nonzero costs.")
+    print("(3) EVM gas varies: first tx has cold SSTORE penalties (~+51k gas).")
     print("(4) Solana fees are flat (5,000 lam/sig). No cost gradient across operations.")
-    print("(5) Compute Units (Solana) not recorded here. Add ComputeBudgetProgram.setComputeUnitLimit")
-    print("    instrumentation before the devnet run.")
     print()
 
 
+# ---------------------------------------------------------------------------
+# Multi-file comparison
+# ---------------------------------------------------------------------------
+
+def print_multi_comparison(results: list[dict], fmt: str = "github", output: pathlib.Path | None = None) -> None:
+    """Print a per-variant/client/env comparison from all loaded result files."""
+    if not results:
+        print("[warn] No lifecycle result files found.", file=sys.stderr)
+        return
+
+    print("\n" + "=" * 100)
+    print("BENCHMARK RESULTS — ALL VARIANTS × CLIENTS × ENVIRONMENTS")
+    print(f"  {len(results)} result file(s) loaded")
+    print("=" * 100)
+
+    # ── 1. Multi-client summary table ─────────────────────────────────────────
+    rows, headers = _build_multi_client_rows(results)
+    rendered = _render(rows, headers, fmt, caption="Benchmark summary by variant, client, and environment")
+    print(rendered)
+
+    # ── 2. Per-variant cross-environment tables ───────────────────────────────
+    variants_seen: set[str] = {r.get("variant", "?") for r in results}
+    for variant in sorted(variants_seen):
+        variant_results = [r for r in results if r.get("variant") == variant]
+        evm_results = [r for r in variant_results if r.get("platform") == "EVM"]
+        sol_results = [r for r in variant_results if r.get("platform") == "Solana"]
+
+        if not evm_results and not sol_results:
+            continue
+
+        # Pick first EVM and first Solana for per-op comparison
+        evm_data = evm_results[0] if evm_results else None
+        sol_data = sol_results[0] if sol_results else None
+
+        if evm_data or sol_data:
+            print(f"\n--- Variant {variant}: per-operation costs ---")
+            rows, headers = _build_operation_rows(evm_data, sol_data)
+            rows.append(_build_throughput_row(evm_data, sol_data))
+            print(_render(rows, headers, fmt,
+                          caption=f"Variant {variant} operation costs and latency"))
+
+    # ── 3. Output to file if requested ────────────────────────────────────────
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        rows, headers = _build_multi_client_rows(results)
+        content = _render(rows, headers, fmt,
+                          caption="Benchmark summary by variant, client, and environment")
+        output.write_text(content)
+        print(f"\n[output] Written to {output}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Parse raw benchmark results and print cross-chain comparison table."
+        description="Parse raw benchmark results and print cross-chain comparison tables."
     )
-    parser.add_argument("--evm",    default=str(config.EVM_RAW_RESULTS),    help="Path to EVM raw JSON")
-    parser.add_argument("--solana", default=str(config.SOLANA_RAW_RESULTS), help="Path to Solana raw JSON")
+    parser.add_argument(
+        "--results-dir",
+        default=str(config.RESULTS_DIR),
+        help="Directory containing result JSON files (default: benchmarks/results/)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["github", "csv", "latex"],
+        default="github",
+        help="Output format: github (default), csv, or latex",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Write rendered output to this file (optional)",
+    )
+    # Legacy two-file args (backward compat)
+    parser.add_argument("--evm",    default=None, help="Path to EVM raw JSON (legacy)")
+    parser.add_argument("--solana", default=None, help="Path to Solana raw JSON (legacy)")
     args = parser.parse_args()
 
-    evm_path = pathlib.Path(args.evm)
-    sol_path = pathlib.Path(args.solana)
+    out_path = pathlib.Path(args.output) if args.output else None
 
-    evm_data, sol_data = load_results(evm_path, sol_path)
-    print_comparison(evm_data, sol_data)
+    # Legacy mode: explicit --evm / --solana paths
+    if args.evm or args.solana:
+        evm_path = pathlib.Path(args.evm) if args.evm else config.EVM_RAW_RESULTS
+        sol_path = pathlib.Path(args.solana) if args.solana else config.SOLANA_RAW_RESULTS
+        evm_data, sol_data = load_results(evm_path, sol_path)
+        print_comparison(evm_data, sol_data, fmt=args.format)
+        return
+
+    # Multi-file mode: scan results directory
+    results_dir = pathlib.Path(args.results_dir)
+    if not results_dir.exists():
+        sys.exit(f"[error] Results directory not found: {results_dir}. Run benchmarks first.")
+
+    results = load_all_results(results_dir)
+    print_multi_comparison(results, fmt=args.format, output=out_path)
 
 
 if __name__ == "__main__":

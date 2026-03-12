@@ -661,14 +661,20 @@ python -c "import tabulate; print('tabulate OK')"
 All tunable constants live in `benchmarks/config.py`. Override via environment
 variables:
 
-| Variable            | Default                       | Description                        |
-| ------------------- | ----------------------------- | ---------------------------------- |
-| `EVM_RPC_URL`       | `http://127.0.0.1:8545`       | Hardhat JSON-RPC endpoint          |
-| `EVM_MNEMONIC`      | Hardhat default test mnemonic | HD wallet mnemonic (localnet only) |
-| `SOLANA_RPC_URL`    | `http://127.0.0.1:8899`       | Solana validator RPC endpoint      |
-| `ANCHOR_WALLET`     | `~/.config/solana/id.json`    | Payer keypair path                 |
-| `SOLANA_PROGRAM_ID` | (from Anchor.toml)            | Deployed program ID                |
-| `N_CONTRIBUTIONS`   | `50`                          | Number of sequential contributions |
+| Variable            | Default                       | Description                                              |
+| ------------------- | ----------------------------- | -------------------------------------------------------- |
+| `EVM_RPC_URL`       | `http://127.0.0.1:8545`       | Hardhat JSON-RPC endpoint                                |
+| `EVM_MNEMONIC`      | Hardhat default test mnemonic | HD wallet mnemonic (localnet only)                       |
+| `SOLANA_RPC_URL`    | `http://127.0.0.1:8899`       | Solana validator RPC endpoint                            |
+| `ANCHOR_WALLET`     | `~/.config/solana/id.json`    | Payer keypair path                                       |
+| `SOLANA_PROGRAM_ID` | (from Anchor.toml)            | Deployed program ID                                      |
+| `N_CONTRIBUTIONS`   | `50`                          | Number of sequential contributions                       |
+| `VARIANT`           | `V1`                          | Contract variant tag: V1 ERC-20, V4 SPL, V2, V3, V5     |
+| `CLIENT`            | `python`                      | Client label: python, ts-evm, ts-solana, dotnet          |
+| `BENCHMARK_ENV`     | _(auto-detected)_             | Override environment label (e.g. `sepolia`, `solana-devnet`) |
+
+`BENCHMARK_ENV` is inferred from the RPC URL if not set: `infura`/`alchemy`/`sepolia`
+in `EVM_RPC_URL` → `sepolia`; `devnet` in `SOLANA_RPC_URL` → `solana-devnet`.
 
 Scenario constants (same on both chains for fair comparison):
 
@@ -676,7 +682,7 @@ Scenario constants (same on both chains for fair comparison):
 - **Soft cap:** 100 USDC (reachable at N=10)
 - **Hard cap:** 500 USDC (reachable at N=50)
 - **Milestones:** [30, 30, 40]
-- **Refund scenario:** soft cap set to 1000 USDC (unreachable) → campaign fails
+- **Refund scenario:** soft cap set to 400 USDC (unreachable by 5 contributors) → campaign fails
 
 ### Scripts
 
@@ -689,14 +695,17 @@ and the **refund path** (create → contribute×5 → finalize → refund×5).
 # EVM only (start Hardhat node first: cd contracts/evm && npx hardhat node)
 python benchmarks/run_tests.py --platform evm
 
-# Solana only (start validator + deploy program first)
-python benchmarks/run_tests.py --platform solana
+# Tag with variant and client for the multi-variant matrix
+VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
+VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
 
-# Both platforms
-python benchmarks/run_tests.py
+# Sepolia (set EVM_RPC_URL before running)
+EVM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY \
+VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
 ```
 
-Output: `benchmarks/results/evm_raw.json` and `benchmarks/results/solana_raw.json`.
+Output: `benchmarks/results/V1_python_hardhat-localnet_lifecycle.json`
+(and legacy `benchmarks/results/evm_raw.json` for backward compat).
 
 #### `throughput_test.py` — Isolated TPS measurement
 
@@ -705,50 +714,226 @@ timed window, then submits N sequential contributions with wall-clock timing.
 
 ```bash
 python benchmarks/throughput_test.py --platform evm
+VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
 python benchmarks/throughput_test.py --platform solana
 ```
 
-Output: appends a record to `benchmarks/results/throughput_evm.json` or
-`throughput_solana.json` (multiple runs accumulate for statistical comparison).
+Output: `benchmarks/results/V1_python_hardhat-localnet_throughput.json`
+
+#### `deploy_evm.py` — Standalone EVM deployer
+
+Deploys MockERC20, CrowdfundingFactory, and a campaign in one step. Prints a
+JSON object with all addresses to **stdout** — suitable for piping into shell
+variables or passing to the client benchmark scripts.
+
+```bash
+# Hardhat localnet
+python benchmarks/deploy_evm.py --variant V1 > /tmp/evm_deploy.json
+cat /tmp/evm_deploy.json
+# {"variant":"V1","environment":"hardhat-localnet","mockERC20":"0x5Fb...","factory":"0xe7f...","campaign":"0x9fE..."}
+
+# Sepolia
+EVM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY \
+EVM_PRIVATE_KEY=0x... \
+python benchmarks/deploy_evm.py --variant V1 --env sepolia > /tmp/evm_deploy_sepolia.json
+```
+
+#### `run_client_benchmark.py` — Lifecycle benchmark via TS or .NET clients
+
+Drives `npm run <op>` (ts-evm) or `dotnet run -- <op>` (dotnet) as subprocesses
+for each operation, parses their TxOutput JSON stdout, and writes a canonical
+schema v2 result file.
+
+```bash
+# ts-evm client, V1, hardhat-localnet
+python benchmarks/run_client_benchmark.py \
+    --platform evm --client ts --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+# → benchmarks/results/V1_ts-evm_hardhat-localnet_lifecycle.json
+
+# dotnet client, V1, hardhat-localnet
+python benchmarks/run_client_benchmark.py \
+    --platform evm --client dotnet --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+# → benchmarks/results/V1_dotnet_hardhat-localnet_lifecycle.json
+
+# ts-solana client, V4, solana-localnet
+python benchmarks/run_client_benchmark.py \
+    --platform solana --client ts --variant V4 --env solana-localnet
+# → benchmarks/results/V4_ts-solana_solana-localnet_lifecycle.json
+```
+
+> **Cross-client gas parity:** `ts-evm/contribute.ts` bundles `approve` + `contribute`
+> gas in its top-level `gasUsed`. The runner reads `data.contributeGasUsed` instead,
+> so all clients report the same on-chain contribute gas for valid comparison.
+
+#### `run_throughput_client.py` — Throughput-only benchmark via TS or .NET clients
+
+Same subprocess approach as above but measures only the N-contribution window.
+Records both `latency_ms` (client-measured elapsed) and `process_elapsed_ms`
+(wall-clock including subprocess startup overhead) separately.
+
+```bash
+python benchmarks/run_throughput_client.py \
+    --platform evm --client ts --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+# → benchmarks/results/V1_ts-evm_hardhat-localnet_throughput.json
+```
 
 #### `collect_metrics.py` — Aggregate and compare
 
-Reads raw JSON from `run_tests.py`, computes per-operation averages, and prints
-a GitHub-flavoured markdown comparison table.
+Scans the results directory, loads all `*_lifecycle.json` files, and prints
+comparison tables. Supports multiple output formats for thesis integration.
 
 ```bash
+# Scan all results, print github-markdown table (default)
 python benchmarks/collect_metrics.py
+
+# Specify directory
+python benchmarks/collect_metrics.py --results-dir benchmarks/results/
+
+# Output formats
+python benchmarks/collect_metrics.py --format csv
+python benchmarks/collect_metrics.py --format latex
+
+# Write LaTeX table to file (for thesis appendix)
+python benchmarks/collect_metrics.py --format latex \
+    --output benchmarks/results/thesis_table.tex
+
+# Legacy two-file mode (backward compat)
+python benchmarks/collect_metrics.py \
+    --evm benchmarks/results/evm_raw.json \
+    --solana benchmarks/results/solana_raw.json
 ```
 
-Output: prints comparison table to stdout + writes `benchmarks/results/comparison_summary.json`.
+Output: multi-variant summary table + per-variant cross-chain operation tables.
+Also writes `benchmarks/results/comparison_summary.json`.
 
-### Output schema
+### Output schema (schema_version "2")
 
-Each raw result file conforms to:
+Result files use the canonical schema v2 format:
 
 ```json
 {
-  "platform": "EVM|Solana",
-  "variant": "V1-ERC20|V4-SPL",
+  "schema_version": "2",
+  "variant": "V1",
+  "variant_label": "ERC-20 receipt tokens",
+  "client": "python",
+  "client_label": "Python web3.py / anchorpy",
+  "environment": "hardhat-localnet",
+  "platform": "EVM",
+  "chain_id": 31337,
+  "timestamp_utc": 1741737600,
+  "limitations": ["Hardhat automines instantly; ..."],
   "operations": [
     {
       "name": "contribute",
+      "scenario": "success",
       "gas_used": 103257,
       "cost": "103257",
-      "latency_ms": 42
+      "latency_ms": 5,
+      "process_elapsed_ms": null,
+      "tx_hash": "0x..."
     }
   ],
   "throughput": {
     "num_contributions": 50,
-    "total_time_ms": 2100,
-    "tps": 23.81
+    "total_time_ms": 1234,
+    "tps": 40.52
   }
 }
 ```
 
-- **EVM cost:** `gas_used` (integer). Fiat conversion requires a live gas price.
-- **Solana cost:** fee in lamports (flat per-signature: 5000 lam/sig).
-- **Solana `compute_units`:** not recorded in localnet runs (planned for devnet).
+**Field notes:**
+- `scenario`: `"success"` (contribute/finalize/withdraw), `"refund"`, or `"throughput"`
+- `process_elapsed_ms`: wall-clock time including subprocess startup (null for Python harness, populated for ts/dotnet client benchmark)
+- **EVM `cost`:** gas used as a string integer. Fiat conversion requires live gas price.
+- **Solana `cost`:** fee in lamports (flat 5,000 lam/sig). The `compute_units` field is null in localnet runs (planned for devnet).
+
+### Result file naming
+
+```
+benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_{kind}.json
+
+Examples:
+  V1_python_hardhat-localnet_lifecycle.json
+  V1_ts-evm_hardhat-localnet_lifecycle.json
+  V1_dotnet_hardhat-localnet_lifecycle.json
+  V4_python_solana-localnet_lifecycle.json
+  V4_ts-solana_solana-localnet_lifecycle.json
+  V1_python_sepolia_lifecycle.json
+  V4_python_solana-devnet_throughput.json
+```
+
+Legacy files `evm_raw.json` / `solana_raw.json` are still written by the Python
+harness for backward compatibility with old `collect_metrics.py --evm` invocations.
+
+### Phase 2 — Client-layer benchmark workflow
+
+Full end-to-end sequence for running all three clients against EVM localnet:
+
+```bash
+REPO=/path/to/multi-chain-crowdfunding-analyses
+source $REPO/benchmarks/.venv/bin/activate
+cd $REPO
+
+# 1. Start Hardhat node (keep open)
+cd contracts/evm && npx hardhat node &
+
+# 2. Deploy contracts, capture addresses
+python benchmarks/deploy_evm.py --variant V1 > /tmp/evm_deploy.json
+
+# 3. Configure ts-evm client
+cp clients/ts-evm/.env.localnet clients/ts-evm/.env
+# Edit clients/ts-evm/.env and paste addresses from /tmp/evm_deploy.json:
+#   FACTORY_ADDRESS=...  CAMPAIGN_ADDRESS=...  PAYMENT_TOKEN_ADDRESS=...
+
+# 4. Configure dotnet client
+cp clients/dotnet/.env.localnet clients/dotnet/.env
+# Edit clients/dotnet/.env and paste the same addresses.
+
+# 5. Python re-baseline
+VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
+VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
+
+# 6. ts-evm lifecycle + throughput
+python benchmarks/run_client_benchmark.py \
+    --platform evm --client ts --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+python benchmarks/run_throughput_client.py \
+    --platform evm --client ts --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+
+# 7. dotnet lifecycle + throughput
+python benchmarks/run_client_benchmark.py \
+    --platform evm --client dotnet --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+python benchmarks/run_throughput_client.py \
+    --platform evm --client dotnet --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+
+# 8. Collect results
+python benchmarks/collect_metrics.py --format github
+python benchmarks/collect_metrics.py --format latex \
+    --output benchmarks/results/thesis_table.tex
+```
+
+### Environment template files
+
+Use the template files to avoid editing `.env` manually:
+
+| Template | Platform | Environment |
+| -------- | -------- | ----------- |
+| `clients/ts-evm/.env.localnet` | EVM + Solana | hardhat-localnet + solana-localnet |
+| `clients/ts-evm/.env.sepolia`  | EVM + Solana | Sepolia testnet + solana-devnet |
+| `clients/dotnet/.env.localnet` | EVM + Solana | hardhat-localnet + solana-localnet |
+| `clients/dotnet/.env.sepolia`  | EVM + Solana | Sepolia testnet + solana-devnet |
+
+```bash
+# Example: switch ts-evm client to Sepolia
+cp clients/ts-evm/.env.sepolia clients/ts-evm/.env
+# Edit: paste YOUR_KEY, YOUR_PRIVATE_KEY, contract addresses from Sepolia deploy
+```
 
 ### Limitations
 
@@ -764,6 +949,10 @@ These must be acknowledged in the thesis methodology section:
    not peak parallel capacity.
 4. **Hardhat accounts:** configured with `accounts: { count: 60 }` in
    `hardhat.config.ts` (1 deployer + up to 59 contributors).
+5. **Subprocess startup overhead** (`process_elapsed_ms`): `run_client_benchmark.py`
+   and `run_throughput_client.py` include tsx/dotnet runtime initialisation time
+   in `process_elapsed_ms`. Use `latency_ms` (client-measured) for apples-to-apples
+   comparison with the Python harness. `process_elapsed_ms` is a DX cost metric.
 
 ---
 

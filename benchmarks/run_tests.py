@@ -12,8 +12,14 @@ Each timed operation records:
 
 Output
 ------
-Writes two JSON files (config.EVM_RAW_RESULTS, config.SOLANA_RAW_RESULTS)
-conforming to the canonical schema defined in collect_metrics.py.
+Writes result JSON conforming to schema_version "2" to
+  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_lifecycle.json
+
+Env vars
+--------
+  VARIANT       Contract variant: V1 (default) | V4 | V2 | V3 | V5
+  CLIENT        Client label: python (default)
+  BENCHMARK_ENV Environment label override (auto-detected from RPC URL if unset)
 
 Run
 ---
@@ -21,6 +27,7 @@ Run
     cd contracts/evm && npx hardhat node
     # Then from repo root:
     python benchmarks/run_tests.py --platform evm
+    VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
     python benchmarks/run_tests.py --platform solana
     python benchmarks/run_tests.py          # runs both
 
@@ -43,6 +50,11 @@ import sys
 from typing import Any
 
 import config
+
+# ---------------------------------------------------------------------------
+# Schema version tag embedded in every result file
+# ---------------------------------------------------------------------------
+SCHEMA_VERSION = "2"
 
 
 # ---------------------------------------------------------------------------
@@ -72,10 +84,10 @@ def _load_json(path: pathlib.Path) -> dict:
 # EVM benchmark
 # ---------------------------------------------------------------------------
 
-def run_evm() -> dict:
+def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     """
     Deploy contracts, run the full lifecycle, and return a result dict
-    conforming to the canonical schema.
+    conforming to schema_version "2".
 
     WHY web3.py + eth_account + HDWallet: anchorpy is Solana-only; web3.py
     is the canonical Python EVM library, and HDWallet lets us derive the same
@@ -121,10 +133,22 @@ def run_evm() -> dict:
         tx["nonce"] = w3.eth.get_transaction_count(signer.address)
         signed = signer.sign_transaction(tx)
         t0 = _ms()
-        tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        tx_hash_bytes = w3.eth.send_raw_transaction(signed.rawTransaction)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash_bytes)
         latency = _ms() - t0
         return receipt, latency
+
+    def _op(name: str, receipt: Any, latency: int, scenario: str) -> dict:
+        """Build a schema-v2 operation record from an EVM receipt."""
+        return {
+            "name": name,
+            "scenario": scenario,
+            "gas_used": receipt["gasUsed"],
+            "cost": str(receipt["gasUsed"]),
+            "latency_ms": latency,
+            "process_elapsed_ms": None,
+            "tx_hash": receipt["transactionHash"].hex(),
+        }
 
     # ── Deploy MockERC20 ────────────────────────────────────────────────────
     print("[evm] Deploying MockERC20...")
@@ -235,12 +259,7 @@ def run_evm() -> dict:
             "gasPrice": w3.eth.gas_price,
         })
         rcpt, latency = _send(tx, acc)
-        contribute_ops.append({
-            "name": "contribute",
-            "gas_used": rcpt["gasUsed"],
-            "cost": str(rcpt["gasUsed"]),   # unit: gas — fiat requires gas price × ETH price
-            "latency_ms": latency,
-        })
+        contribute_ops.append(_op("contribute", rcpt, latency, "success"))
         if (i + 1) % 10 == 0:
             print(f"  {i + 1} / {config.N_CONTRIBUTIONS}")
 
@@ -260,12 +279,7 @@ def run_evm() -> dict:
         "gasPrice": w3.eth.gas_price,
     })
     rcpt, latency = _send(tx, deployer_acc)
-    finalize_op = {
-        "name": "finalize",
-        "gas_used": rcpt["gasUsed"],
-        "cost": str(rcpt["gasUsed"]),
-        "latency_ms": latency,
-    }
+    finalize_op = _op("finalize", rcpt, latency, "success")
 
     # ── withdrawMilestone × 3 (TIMED) ────────────────────────────────────────
     withdraw_ops: list[dict] = []
@@ -279,12 +293,7 @@ def run_evm() -> dict:
             "gasPrice": w3.eth.gas_price,
         })
         rcpt, latency = _send(tx, deployer_acc)
-        withdraw_ops.append({
-            "name": f"withdrawMilestone_{m}",
-            "gas_used": rcpt["gasUsed"],
-            "cost": str(rcpt["gasUsed"]),
-            "latency_ms": latency,
-        })
+        withdraw_ops.append(_op(f"withdrawMilestone_{m}", rcpt, latency, "success"))
 
     # ========================================================================
     # REFUND PATH: softCap = SOFT_CAP_REFUND (> total raised → campaign fails)
@@ -354,18 +363,20 @@ def run_evm() -> dict:
             "gasPrice": w3.eth.gas_price,
         })
         rcpt, latency = _send(tx, acc)
-        refund_ops.append({
-            "name": "refund",
-            "gas_used": rcpt["gasUsed"],
-            "cost": str(rcpt["gasUsed"]),
-            "latency_ms": latency,
-        })
+        refund_ops.append(_op("refund", rcpt, latency, "refund"))
 
-    # ── Assemble result ──────────────────────────────────────────────────────
+    # ── Assemble result (schema v2) ───────────────────────────────────────────
+    env_label = config.BENCHMARK_ENV or config._infer_env(variant)
     result = {
+        "schema_version": SCHEMA_VERSION,
+        "variant": variant,
+        "variant_label": config.VARIANT_LABELS.get(variant, variant),
+        "client": client,
+        "client_label": config.CLIENT_LABELS.get(client, client),
+        "environment": env_label,
         "platform": "EVM",
-        "variant": "V1-ERC20",
-        "environment": config.EVM_RPC_URL,
+        "chain_id": w3.eth.chain_id,
+        "timestamp_utc": int(time.time()),
         "limitations": [
             "Hardhat automines instantly; latency reflects local execution time only, not network propagation.",
             "Gas figures are localnet-only; fiat cost requires gas price from a live network.",
@@ -378,6 +389,9 @@ def run_evm() -> dict:
         },
     }
 
+    out_path = config.results_path(variant, client, "lifecycle")
+    _write_json(out_path, result)
+    # Also write legacy path for backward compat with collect_metrics.py --evm flag
     _write_json(config.EVM_RAW_RESULTS, result)
     print(f"\n[evm] Done. TPS = {result['throughput']['tps']}")
     return result
@@ -388,9 +402,10 @@ def run_evm() -> dict:
 # Solana benchmark
 # ---------------------------------------------------------------------------
 
-def run_solana() -> dict:
+def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     """
-    Initialize program client, run the full lifecycle, return result dict.
+    Initialize program client, run the full lifecycle, return result dict
+    conforming to schema_version "2".
 
     WHY anchorpy: it is the only Python library that supports Anchor IDL-based
     client generation, giving structural parity with the TS client used in the
@@ -619,9 +634,12 @@ def run_solana() -> dict:
             fee = await _get_fee(sig)
             contribute_ops.append({
                 "name": "contribute",
+                "scenario": "success",
                 "compute_units": None,   # CU recording not enabled in this run — see methodology note
                 "cost": str(fee),
                 "latency_ms": latency,
+                "process_elapsed_ms": None,
+                "tx_hash": str(sig),
             })
             if (i + 1) % 10 == 0:
                 print(f"  {i + 1} / {config.N_CONTRIBUTIONS}")
@@ -701,9 +719,12 @@ def run_solana() -> dict:
         fin_fee = await _get_fee(sig)
         finalize_op = {
             "name": "finalize",
+            "scenario": "success",
             "compute_units": None,
             "cost": str(fin_fee),
             "latency_ms": latency,
+            "process_elapsed_ms": None,
+            "tx_hash": str(sig),
         }
 
         # ── withdrawMilestone × 3 (TIMED) ─────────────────────────────────────
@@ -729,9 +750,12 @@ def run_solana() -> dict:
             fee = await _get_fee(sig)
             withdraw_ops.append({
                 "name": f"withdraw_milestone_{m}",
+                "scenario": "success",
                 "compute_units": None,
                 "cost": str(fee),
                 "latency_ms": latency,
+                "process_elapsed_ms": None,
+                "tx_hash": str(sig),
             })
 
         # ========================================================================
@@ -827,17 +851,27 @@ def run_solana() -> dict:
             fee = await _get_fee(sig)
             refund_ops.append({
                 "name": "refund",
+                "scenario": "refund",
                 "compute_units": None,
                 "cost": str(fee),
                 "latency_ms": latency,
+                "process_elapsed_ms": None,
+                "tx_hash": str(sig),
             })
 
         await client.close()
 
+        env_label = config.BENCHMARK_ENV or config._infer_env(variant)
         result = {
+            "schema_version": SCHEMA_VERSION,
+            "variant": variant,
+            "variant_label": config.VARIANT_LABELS.get(variant, variant),
+            "client": client,
+            "client_label": config.CLIENT_LABELS.get(client, client),
+            "environment": env_label,
             "platform": "Solana",
-            "variant": "V4-SPL",
-            "environment": config.SOLANA_RPC_URL,
+            "chain_id": None,
+            "timestamp_utc": int(time.time()),
             "limitations": [
                 "solana-test-validator is single-threaded; TPS does not represent production conditions.",
                 "Compute Units not recorded (requires ComputeBudgetProgram instrumentation — planned for devnet run).",
@@ -851,6 +885,9 @@ def run_solana() -> dict:
             },
         }
 
+        out_path = config.results_path(variant, client, "lifecycle")
+        _write_json(out_path, result)
+        # Also write legacy path for backward compat
         _write_json(config.SOLANA_RAW_RESULTS, result)
         print(f"\n[solana] Done. TPS = {result['throughput']['tps']}")
         return result
@@ -873,12 +910,22 @@ def main() -> None:
         default="both",
         help="Which platform to benchmark (default: both)",
     )
+    parser.add_argument(
+        "--variant",
+        default=config.VARIANT,
+        help="Contract variant: V1 (ERC-20), V4 (SPL Token), V2, V3, V5 (default: $VARIANT or V1)",
+    )
+    parser.add_argument(
+        "--client",
+        default=config.CLIENT,
+        help="Client label for tagging results (default: $CLIENT or python)",
+    )
     args = parser.parse_args()
 
     if args.platform in ("evm", "both"):
-        run_evm()
+        run_evm(variant=args.variant, client=args.client)
     if args.platform in ("solana", "both"):
-        run_solana()
+        run_solana(variant=args.variant, client=args.client)
 
 
 if __name__ == "__main__":

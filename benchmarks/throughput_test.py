@@ -16,7 +16,14 @@ measurement reported in docs/measurements.md (M-V1-1 / M-V4-1).
 
 Output
 ------
-Appends a JSON record to benchmarks/results/throughput_<platform>.json.
+Writes a JSON record to
+  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_throughput.json
+
+Env vars
+--------
+  VARIANT       Contract variant: V1 (default) | V4 | V2 | V3 | V5
+  CLIENT        Client label: python (default)
+  BENCHMARK_ENV Environment label override (auto-detected from RPC URL if unset)
 
 Limitations
 -----------
@@ -30,6 +37,7 @@ Limitations
 Run
 ---
     python benchmarks/throughput_test.py --platform evm
+    VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
     python benchmarks/throughput_test.py --platform solana
 """
 
@@ -43,20 +51,17 @@ import sys
 
 import config
 
+SCHEMA_VERSION = "2"
+
 
 def _ms() -> int:
     return int(time.time() * 1000)
 
 
-def _append_result(path: pathlib.Path, record: dict) -> None:
+def _write_result(path: pathlib.Path, record: dict) -> None:
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    existing: list = []
-    if path.exists():
-        with open(path) as fh:
-            existing = json.load(fh)
-    existing.append(record)
     with open(path, "w") as fh:
-        json.dump(existing, fh, indent=2)
+        json.dump(record, fh, indent=2)
     print(f"[output] {path}")
 
 
@@ -64,7 +69,7 @@ def _append_result(path: pathlib.Path, record: dict) -> None:
 # EVM throughput
 # ---------------------------------------------------------------------------
 
-def throughput_evm() -> dict:
+def throughput_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     try:
         from web3 import Web3
         from web3.middleware import geth_poa_middleware
@@ -159,33 +164,58 @@ def throughput_evm() -> dict:
     tps = round(config.N_CONTRIBUTIONS / (total_ms / 1000), 4)
 
     import statistics
+    env_label = config.BENCHMARK_ENV or config._infer_env(variant)
     result = {
+        "schema_version": SCHEMA_VERSION,
+        "variant": variant,
+        "variant_label": config.VARIANT_LABELS.get(variant, variant),
+        "client": client,
+        "client_label": config.CLIENT_LABELS.get(client, client),
+        "environment": env_label,
         "platform": "EVM",
-        "variant": "V1-ERC20",
+        "chain_id": w3.eth.chain_id,
         "timestamp_utc": int(time.time()),
-        "n": config.N_CONTRIBUTIONS,
-        "total_time_ms": total_ms,
-        "tps": tps,
-        "per_tx_gas": {
-            "avg": round(statistics.mean(per_tx_gas), 2),
-            "min": min(per_tx_gas),
-            "max": max(per_tx_gas),
-            "stdev": round(statistics.stdev(per_tx_gas), 2),
+        "limitations": [
+            "Hardhat automines instantly; latency = local execution time only, not network propagation.",
+        ],
+        "operations": [
+            {
+                "name": "contribute",
+                "scenario": "throughput",
+                "gas_used": g,
+                "cost": str(g),
+                "latency_ms": l,
+                "process_elapsed_ms": None,
+                "tx_hash": None,
+            }
+            for g, l in zip(per_tx_gas, per_tx_latency)
+        ],
+        "throughput": {
+            "num_contributions": config.N_CONTRIBUTIONS,
+            "total_time_ms": total_ms,
+            "tps": tps,
+            "per_tx_gas": {
+                "avg": round(statistics.mean(per_tx_gas), 2),
+                "min": min(per_tx_gas),
+                "max": max(per_tx_gas),
+                "stdev": round(statistics.stdev(per_tx_gas), 2),
+            },
+            "per_tx_latency_ms": {
+                "avg": round(statistics.mean(per_tx_latency), 2),
+                "min": min(per_tx_latency),
+                "max": max(per_tx_latency),
+                "stdev": round(statistics.stdev(per_tx_latency), 2),
+            },
         },
-        "per_tx_latency_ms": {
-            "avg": round(statistics.mean(per_tx_latency), 2),
-            "min": min(per_tx_latency),
-            "max": max(per_tx_latency),
-            "stdev": round(statistics.stdev(per_tx_latency), 2),
-        },
-        "limitation": "Hardhat automines instantly; latency = local execution time only, not network propagation.",
     }
 
     print(f"\n[evm] Throughput: {config.N_CONTRIBUTIONS} tx in {total_ms} ms → {tps} TPS")
-    print(f"[evm] Gas avg={result['per_tx_gas']['avg']} min={result['per_tx_gas']['min']} max={result['per_tx_gas']['max']}")
+    print(f"[evm] Gas avg={result['throughput']['per_tx_gas']['avg']} "
+          f"min={result['throughput']['per_tx_gas']['min']} "
+          f"max={result['throughput']['per_tx_gas']['max']}")
 
-    out_path = config.RESULTS_DIR / "throughput_evm.json"
-    _append_result(out_path, result)
+    out_path = config.results_path(variant, client, "throughput")
+    _write_result(out_path, result)
     return result
 
 
@@ -193,7 +223,7 @@ def throughput_evm() -> dict:
 # Solana throughput
 # ---------------------------------------------------------------------------
 
-def throughput_solana() -> dict:
+def throughput_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     try:
         from anchorpy import Program, Provider, Wallet, Idl, Context
         from solana.rpc.async_api import AsyncClient
@@ -333,32 +363,56 @@ def throughput_solana() -> dict:
         tps = round(config.N_CONTRIBUTIONS / (total_ms / 1000), 4)
 
         import statistics
+        env_label = config.BENCHMARK_ENV or config._infer_env(variant)
         result = {
+            "schema_version": SCHEMA_VERSION,
+            "variant": variant,
+            "variant_label": config.VARIANT_LABELS.get(variant, variant),
+            "client": client,
+            "client_label": config.CLIENT_LABELS.get(client, client),
+            "environment": env_label,
             "platform": "Solana",
-            "variant": "V4-SPL",
+            "chain_id": None,
             "timestamp_utc": int(time.time()),
-            "n": config.N_CONTRIBUTIONS,
-            "total_time_ms": total_ms,
-            "tps": tps,
-            "per_tx_fee_lamports": {
-                "avg": round(statistics.mean(per_tx_fee), 2),
-                "min": min(per_tx_fee),
-                "max": max(per_tx_fee),
+            "limitations": [
+                "solana-test-validator single-threaded; TPS not representative of production conditions.",
+                "Fees are flat (5000 lam/signature); no gas-price analogue exists.",
+            ],
+            "operations": [
+                {
+                    "name": "contribute",
+                    "scenario": "throughput",
+                    "compute_units": None,
+                    "cost": str(fee),
+                    "latency_ms": lat,
+                    "process_elapsed_ms": None,
+                    "tx_hash": None,
+                }
+                for fee, lat in zip(per_tx_fee, per_tx_latency)
+            ],
+            "throughput": {
+                "num_contributions": config.N_CONTRIBUTIONS,
+                "total_time_ms": total_ms,
+                "tps": tps,
+                "per_tx_fee_lamports": {
+                    "avg": round(statistics.mean(per_tx_fee), 2),
+                    "min": min(per_tx_fee),
+                    "max": max(per_tx_fee),
+                },
+                "per_tx_latency_ms": {
+                    "avg": round(statistics.mean(per_tx_latency), 2),
+                    "min": min(per_tx_latency),
+                    "max": max(per_tx_latency),
+                    "stdev": round(statistics.stdev(per_tx_latency), 2),
+                },
             },
-            "per_tx_latency_ms": {
-                "avg": round(statistics.mean(per_tx_latency), 2),
-                "min": min(per_tx_latency),
-                "max": max(per_tx_latency),
-                "stdev": round(statistics.stdev(per_tx_latency), 2),
-            },
-            "limitation": "solana-test-validator single-threaded; TPS not representative of production conditions.",
         }
 
         print(f"\n[solana] Throughput: {config.N_CONTRIBUTIONS} tx in {total_ms} ms → {tps} TPS")
-        print(f"[solana] Fee avg={result['per_tx_fee_lamports']['avg']} lam (flat per-sig)")
+        print(f"[solana] Fee avg={result['throughput']['per_tx_fee_lamports']['avg']} lam (flat per-sig)")
 
-        out_path = config.RESULTS_DIR / "throughput_solana.json"
-        _append_result(out_path, result)
+        out_path = config.results_path(variant, client, "throughput")
+        _write_result(out_path, result)
         return result
 
     return asyncio.run(_run())
@@ -373,12 +427,22 @@ def main() -> None:
         description="Isolated throughput test: N sequential contributions, measure TPS."
     )
     parser.add_argument("--platform", choices=["evm", "solana", "both"], default="both")
+    parser.add_argument(
+        "--variant",
+        default=config.VARIANT,
+        help="Contract variant: V1 (ERC-20), V4 (SPL Token), etc. (default: $VARIANT or V1)",
+    )
+    parser.add_argument(
+        "--client",
+        default=config.CLIENT,
+        help="Client label for tagging results (default: $CLIENT or python)",
+    )
     args = parser.parse_args()
 
     if args.platform in ("evm", "both"):
-        throughput_evm()
+        throughput_evm(variant=args.variant, client=args.client)
     if args.platform in ("solana", "both"):
-        throughput_solana()
+        throughput_solana(variant=args.variant, client=args.client)
 
 
 if __name__ == "__main__":
