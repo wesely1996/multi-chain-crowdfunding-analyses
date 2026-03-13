@@ -184,7 +184,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
     """Run full EVM lifecycle via ts or dotnet client subprocesses."""
 
     # Determine client directory and runner
-    ts_dir = str(config.REPO_ROOT / "clients" / "ts-evm")
+    ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-evm")
 
@@ -409,7 +409,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
     except Exception:
         chain_id = deploy_json.get("chain_id")
 
-    client_label = "ts-evm" if use_ts else "dotnet"
+    client_label = "ts" if use_ts else "dotnet"
     result = {
         "schema_version": SCHEMA_VERSION,
         "variant": variant,
@@ -469,7 +469,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
 
     import asyncio
 
-    ts_dir = str(config.REPO_ROOT / "clients" / "ts-evm")
+    ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-solana")
 
@@ -788,7 +788,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         total_ms = sum(contrib_latencies)
         tps = round(len(contrib_latencies) / (total_ms / 1000), 4) if total_ms > 0 else 0.0
 
-        client_label = "ts-solana" if use_ts else "dotnet"
+        client_label = "ts" if use_ts else "dotnet"
         return {
             "schema_version": SCHEMA_VERSION,
             "variant": variant,

@@ -9,88 +9,15 @@ import type {
   CrowdfundingFactory,
   MockERC20,
 } from "../typechain-types";
-
-// ─── constants ────────────────────────────────────────────────────────────────
-
-const SOFT_CAP  = hre.ethers.parseUnits("50000",  6); // 50 000 USDC
-const HARD_CAP  = hre.ethers.parseUnits("100000", 6); // 100 000 USDC
-const CONTRIB   = hre.ethers.parseUnits("1000",   6); // 1 000 USDC per contributor
-const MILESTONES: number[] = [30, 30, 40];
-const ONE_DAY   = 86400;
-const THIRTY_DAYS = 30 * ONE_DAY;
-
-// ─── fixture ──────────────────────────────────────────────────────────────────
-
-async function deployFixture() {
-  const signers = await hre.ethers.getSigners();
-  const [deployer, creator, alice, bob] = signers;
-
-  // Deploy payment token
-  const MockERC20Factory = await hre.ethers.getContractFactory("MockERC20");
-  const usdc = (await MockERC20Factory.deploy("Mock USDC", "USDC")) as MockERC20;
-
-  // Deploy factory
-  const FactoryFactory = await hre.ethers.getContractFactory("CrowdfundingFactory");
-  const factory = (await FactoryFactory.deploy()) as CrowdfundingFactory;
-
-  // Create a campaign via factory
-  const deadline = (await time.latest()) + THIRTY_DAYS;
-  const tx = await factory
-    .connect(creator)
-    .createCampaign(
-      await usdc.getAddress(),
-      SOFT_CAP,
-      HARD_CAP,
-      deadline,
-      MILESTONES,
-      "Campaign Receipt",
-      "CRT"
-    );
-  const receipt = await tx.wait();
-
-  // Parse campaign address from CampaignCreated event on the factory
-  const factoryAddress = await factory.getAddress();
-  const iface = factory.interface;
-  let campaignAddress = "";
-  for (const log of receipt!.logs) {
-    if (log.address.toLowerCase() === factoryAddress.toLowerCase()) {
-      try {
-        const parsed = iface.parseLog(log);
-        if (parsed && parsed.name === "CampaignCreated") {
-          campaignAddress = parsed.args[0];
-          break;
-        }
-      } catch {}
-    }
-  }
-  if (!campaignAddress) throw new Error("CampaignCreated event not found");
-
-  const campaign = (await hre.ethers.getContractAt(
-    "CrowdfundingCampaign",
-    campaignAddress
-  )) as CrowdfundingCampaign;
-
-  const receiptTokenAddress = await campaign.receiptToken();
-  const receiptToken = await hre.ethers.getContractAt("CampaignToken", receiptTokenAddress);
-
-  // Mint USDC to contributors
-  await usdc.mint(await alice.getAddress(), hre.ethers.parseUnits("200000", 6));
-  await usdc.mint(await bob.getAddress(),   hre.ethers.parseUnits("200000", 6));
-
-  return { factory, campaign, usdc, receiptToken, deployer, creator, alice, bob, deadline };
-}
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-async function fundAndApprove(
-  usdc: MockERC20,
-  campaign: CrowdfundingCampaign,
-  signer: Awaited<ReturnType<typeof hre.ethers.getSigner>>,
-  amount: bigint
-) {
-  await usdc.connect(signer).approve(await campaign.getAddress(), amount);
-  await campaign.connect(signer).contribute(amount);
-}
+import {
+  SOFT_CAP,
+  HARD_CAP,
+  CONTRIB,
+  MILESTONES,
+  THIRTY_DAYS,
+  deployFixture,
+  fundAndApprove,
+} from "./fixtures";
 
 // ─── test suites ──────────────────────────────────────────────────────────────
 

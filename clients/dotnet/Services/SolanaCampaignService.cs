@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Solnet.Rpc;
 using Solnet.Wallet;
+using CrowdfundingClient.Configuration;
 using CrowdfundingClient.Models;
 using CrowdfundingClient.Solana;
 
@@ -15,17 +16,16 @@ public class SolanaCampaignService
     private readonly PublicKey? _campaignAddress;
     private readonly ulong _campaignId;
 
-    public SolanaCampaignService(string rpcUrl, string keypairPath, string programId,
-        string paymentMint, string? campaignAddress, ulong campaignId)
+    public SolanaCampaignService(SolanaConfig config)
     {
-        _rpc = ClientFactory.GetClient(rpcUrl);
-        var keypairJson = File.ReadAllText(keypairPath);
+        _rpc = ClientFactory.GetClient(config.RpcUrl);
+        var keypairJson = File.ReadAllText(config.KeypairPath);
         var bytes = System.Text.Json.JsonSerializer.Deserialize<byte[]>(keypairJson)!;
         _signer = new Account(bytes[..64], bytes[32..64]);
-        _programId = new PublicKey(programId);
-        _paymentMint = new PublicKey(paymentMint);
-        _campaignAddress = string.IsNullOrEmpty(campaignAddress) ? null : new PublicKey(campaignAddress);
-        _campaignId = campaignId;
+        _programId = new PublicKey(config.ProgramId);
+        _paymentMint = new PublicKey(config.PaymentMint);
+        _campaignAddress = string.IsNullOrEmpty(config.CampaignAddress) ? null : new PublicKey(config.CampaignAddress);
+        _campaignId = config.CampaignId;
     }
 
     private PublicKey ResolveCampaign(string? explicitAddress = null)

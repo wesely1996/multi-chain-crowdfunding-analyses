@@ -58,8 +58,7 @@ VARIANT_LABELS: dict[str, str] = {
 
 CLIENT_LABELS: dict[str, str] = {
     "python": "Python web3.py / anchorpy",
-    "ts": "TypeScript (viem / Anchor TS)",
-    "ts-evm": "TypeScript viem",
+    "ts": "TypeScript viem / Anchor TS",
     "ts-solana": "TypeScript Anchor TS",
     "dotnet": ".NET Nethereum / Solnet",
 }

@@ -16,11 +16,11 @@ public static class OutputHelper
         Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions));
     }
 
-    public static void PrintError(string operation, Exception ex)
+    public static void PrintError(string operation, Exception ex, string chain = "unknown")
     {
         var output = new TxOutput
         {
-            Chain = "evm",
+            Chain = chain,
             Operation = operation,
             Status = "reverted",
             Timestamp = DateTime.UtcNow.ToString("o"),

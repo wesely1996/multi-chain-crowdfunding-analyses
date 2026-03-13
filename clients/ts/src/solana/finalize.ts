@@ -1,21 +1,16 @@
 import { parseArgs } from "node:util";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
-import {
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-} from "@solana/spl-token";
 import {
   connection,
   wallet,
   program,
   sendAndConfirmTx,
-  paymentMint,
   SOLANA_CAMPAIGN_ADDRESS,
   SOLANA_CAMPAIGN_ID,
 } from "./config.js";
-import { campaignPda, vaultPda, receiptMintPda } from "./pda.js";
-import { printResult, printError } from "../output.js";
+import { campaignPda } from "./pda.js";
+import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
   options: {
@@ -34,25 +29,14 @@ async function main() {
     campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
   }
 
-  const vault = vaultPda(campaignAddr);
-  const receiptMint = receiptMintPda(campaignAddr);
-  const contributorPaymentAta = getAssociatedTokenAddressSync(paymentMint, wallet.publicKey);
-  const contributorReceiptAta = getAssociatedTokenAddressSync(receiptMint, wallet.publicKey);
-
   const start = performance.now();
 
   const sig = await sendAndConfirmTx(
     program.methods
-      .refund()
+      .finalize()
       .accounts({
-        contributor: wallet.publicKey,
+        caller: wallet.publicKey,
         campaign: campaignAddr,
-        contributorPaymentAta,
-        contributorReceiptAta,
-        vault,
-        receiptMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
       } as any)
       .signers([wallet]),
   );
@@ -64,9 +48,12 @@ async function main() {
     maxSupportedTransactionVersion: 0,
   });
 
+  // Read updated campaign state
+  const campaignAccount = await (program.account as any).campaign.fetch(campaignAddr);
+
   printResult({
     chain: "solana",
-    operation: "refund",
+    operation: "finalize",
     txHash: sig,
     blockNumber: tx?.slot ?? null,
     gasUsed: tx?.meta?.fee ?? null,
@@ -74,10 +61,11 @@ async function main() {
     timestamp: new Date().toISOString(),
     elapsedMs: Math.round(elapsed),
     data: {
-      contributor: wallet.publicKey.toBase58(),
+      successful: campaignAccount.successful,
+      totalRaised: campaignAccount.totalRaised.toString(),
       campaignAddress: campaignAddr.toBase58(),
     },
   });
 }
 
-main().catch((err) => printError("refund", err, "solana"));
+main().catch((err) => printError("finalize", err, "solana"));

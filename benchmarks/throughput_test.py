@@ -50,12 +50,9 @@ import pathlib
 import sys
 
 import config
+from evm_utils import ms as _ms
 
 SCHEMA_VERSION = "2"
-
-
-def _ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _write_result(path: pathlib.Path, record: dict) -> None:

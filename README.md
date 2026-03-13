@@ -34,7 +34,7 @@ Init → Funding (softCap, hardCap, deadline) → Finalize → Success (withdraw
 ```
 contracts/evm/        – Solidity contracts + Hardhat/Foundry tests and deploy scripts
 contracts/solana/     – Anchor program (programs/crowdfunding/) + tests
-clients/ts-evm/       – TypeScript + viem client helpers
+clients/ts/           – TypeScript + viem client helpers (EVM and Solana)
 clients/dotnet/       – C# + Nethereum client
 benchmarks/           – Python + web3.py benchmark harness; results in results/
 docs/                 – Architecture, measurements, security, and scope documentation
@@ -44,7 +44,7 @@ docs/                 – Architecture, measurements, security, and scope docume
 
 | Client | Stack | Purpose |
 |--------|-------|---------|
-| `clients/ts-evm/` | TypeScript + viem | Primary EVM interaction |
+| `clients/ts/` | TypeScript + viem / Anchor TS | EVM and Solana lifecycle scripts |
 | `clients/dotnet/` | C# + Nethereum | .NET integration layer |
 | `benchmarks/` | Python + web3.py | Automated benchmarking and metric collection |
 | `contracts/solana/` | TypeScript + Anchor | Solana program deployment and testing |

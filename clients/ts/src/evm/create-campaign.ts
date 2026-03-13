@@ -10,7 +10,7 @@ import {
   CAMPAIGN_ABI,
   DECIMALS,
 } from "./config.js";
-import { printResult, printError } from "./output.js";
+import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
   options: {

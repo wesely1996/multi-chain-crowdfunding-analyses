@@ -6,16 +6,9 @@ import fs from "node:fs";
 import os from "node:os";
 import idlJson from "../../idl/crowdfunding.json" with { type: "json" };
 
-// ── Env validation ──────────────────────────────────────────────────────────
+import { requireEnv, DECIMALS } from "../shared/env.js";
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    console.error(JSON.stringify({ error: `Missing env var: ${name}` }));
-    process.exit(1);
-  }
-  return value;
-}
+// ── Env validation ──────────────────────────────────────────────────────────
 
 export const SOLANA_RPC_URL = requireEnv("SOLANA_RPC_URL");
 export const SOLANA_KEYPAIR_PATH = requireEnv("SOLANA_KEYPAIR_PATH");
@@ -23,6 +16,8 @@ export const SOLANA_PROGRAM_ID = requireEnv("SOLANA_PROGRAM_ID");
 export const SOLANA_PAYMENT_MINT = requireEnv("SOLANA_PAYMENT_MINT");
 export const SOLANA_CAMPAIGN_ADDRESS = process.env["SOLANA_CAMPAIGN_ADDRESS"] ?? "";
 export const SOLANA_CAMPAIGN_ID = process.env["SOLANA_CAMPAIGN_ID"] ?? "0";
+
+export { DECIMALS };
 
 // ── Connection & wallet ─────────────────────────────────────────────────────
 
@@ -47,10 +42,6 @@ const provider = new anchor.AnchorProvider(connection, anchorWallet, {
 anchor.setProvider(provider);
 
 export const program = new Program(idlJson as any, provider);
-
-// ── Token decimals ──────────────────────────────────────────────────────────
-
-export const DECIMALS = 6;
 
 // ── RPC helper (works around SendTransactionError constructor mismatch) ─────
 

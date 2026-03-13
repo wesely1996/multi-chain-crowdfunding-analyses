@@ -7,6 +7,7 @@ using Nethereum.RPC.Eth.DTOs;
 using Nethereum.ABI.FunctionEncoding.Attributes;
 using Nethereum.Hex.HexTypes;
 using Nethereum.RPC.TransactionManagers;
+using CrowdfundingClient.Configuration;
 using CrowdfundingClient.Contracts;
 using CrowdfundingClient.Models;
 
@@ -81,15 +82,16 @@ public class EvmCampaignService
     private readonly string _factoryAddress;
     private readonly string _campaignAddress;
     private readonly string _paymentTokenAddress;
+    private readonly EvmConfig _config;
 
-    public EvmCampaignService(string rpcUrl, string privateKey, int chainId,
-        string factoryAddress, string campaignAddress, string paymentTokenAddress)
+    public EvmCampaignService(EvmConfig config)
     {
-        var account = new Account(privateKey, chainId);
-        _web3 = new Web3(account, rpcUrl);
-        _factoryAddress = factoryAddress;
-        _campaignAddress = campaignAddress;
-        _paymentTokenAddress = paymentTokenAddress;
+        _config = config;
+        var account = new Account(config.PrivateKey, config.ChainId);
+        _web3 = new Web3(account, config.RpcUrl);
+        _factoryAddress = config.FactoryAddress;
+        _campaignAddress = config.CampaignAddress;
+        _paymentTokenAddress = config.PaymentTokenAddress;
     }
 
     public async Task<TxOutput> CreateCampaign(BigInteger softCap, BigInteger hardCap,
@@ -101,7 +103,7 @@ public class EvmCampaignService
 
         var txHash = await function.SendTransactionAsync(
             _web3.TransactionManager.Account.Address,
-            new HexBigInteger(3_000_000),
+            new HexBigInteger(_config.GasCreateCampaign),
             null,
             _paymentTokenAddress, softCap, hardCap, deadline, milestones, tokenName, tokenSymbol);
         var receipt = await WaitForReceipt(txHash);
@@ -146,14 +148,14 @@ public class EvmCampaignService
         // Step 1: approve
         var token = _web3.Eth.GetContract(MockERC20Abi.ABI, _paymentTokenAddress);
         var approveTxHash = await token.GetFunction("approve")
-            .SendTransactionAsync(sender, new HexBigInteger(200_000), null,
+            .SendTransactionAsync(sender, new HexBigInteger(_config.GasApprove), null,
                 _campaignAddress, amount);
         var approveReceipt = await WaitForReceipt(approveTxHash);
 
         // Step 2: contribute
         var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
         var contributeTxHash = await campaign.GetFunction("contribute")
-            .SendTransactionAsync(sender, new HexBigInteger(300_000), null, amount);
+            .SendTransactionAsync(sender, new HexBigInteger(_config.GasContribute), null, amount);
         var receipt = await WaitForReceipt(contributeTxHash);
         sw.Stop();
 
@@ -188,7 +190,7 @@ public class EvmCampaignService
         var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
         var txHash = await campaign.GetFunction("finalize")
             .SendTransactionAsync(_web3.TransactionManager.Account.Address,
-                new HexBigInteger(200_000), null);
+                new HexBigInteger(_config.GasFinalize), null);
         var receipt = await WaitForReceipt(txHash);
         sw.Stop();
 
@@ -218,7 +220,7 @@ public class EvmCampaignService
         var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
         var txHash = await campaign.GetFunction("withdrawMilestone")
             .SendTransactionAsync(_web3.TransactionManager.Account.Address,
-                new HexBigInteger(300_000), null);
+                new HexBigInteger(_config.GasWithdraw), null);
         var receipt = await WaitForReceipt(txHash);
         sw.Stop();
 
@@ -248,7 +250,7 @@ public class EvmCampaignService
         var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
         var txHash = await campaign.GetFunction("refund")
             .SendTransactionAsync(_web3.TransactionManager.Account.Address,
-                new HexBigInteger(300_000), null);
+                new HexBigInteger(_config.GasRefund), null);
         var receipt = await WaitForReceipt(txHash);
         sw.Stop();
 
@@ -327,14 +329,21 @@ public class EvmCampaignService
         };
     }
 
-    private async Task<TransactionReceipt> WaitForReceipt(string txHash)
+    private async Task<TransactionReceipt> WaitForReceipt(string txHash, int maxAttempts = 60)
     {
         TransactionReceipt? receipt = null;
+        int attempts = 0;
         while (receipt == null)
         {
             receipt = await _web3.Eth.Transactions.GetTransactionReceipt
                 .SendRequestAsync(txHash);
-            if (receipt == null) await Task.Delay(100);
+            if (receipt == null)
+            {
+                if (++attempts >= maxAttempts)
+                    throw new TimeoutException(
+                        $"Receipt not found after {maxAttempts} attempts for {txHash}");
+                await Task.Delay(100);
+            }
         }
         return receipt;
     }

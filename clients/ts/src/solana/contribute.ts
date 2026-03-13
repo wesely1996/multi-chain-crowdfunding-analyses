@@ -17,7 +17,7 @@ import {
   DECIMALS,
 } from "./config.js";
 import { campaignPda, vaultPda, receiptMintPda } from "./pda.js";
-import { printResult, printError } from "../output.js";
+import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
   options: {

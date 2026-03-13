@@ -5,7 +5,7 @@ import {
   CAMPAIGN_ADDRESS,
   CAMPAIGN_ABI,
 } from "./config.js";
-import { printResult, printError } from "./output.js";
+import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
   options: {

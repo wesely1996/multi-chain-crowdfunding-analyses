@@ -9,7 +9,7 @@ import {
   SOLANA_CAMPAIGN_ID,
 } from "./config.js";
 import { campaignPda, contributorRecordPda } from "./pda.js";
-import { printResult, printError } from "../output.js";
+import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
   options: {

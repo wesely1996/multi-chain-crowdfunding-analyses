@@ -50,6 +50,7 @@ import sys
 from typing import Any
 
 import config
+from evm_utils import ms as _ms
 
 # ---------------------------------------------------------------------------
 # Schema version tag embedded in every result file
@@ -71,10 +72,6 @@ def _write_json(path: pathlib.Path, data: dict) -> None:
         json.dump(data, fh, indent=2)
     print(f"[output] {path}")
 
-
-def _ms() -> int:
-    """Return current time in milliseconds."""
-    return int(time.time() * 1000)
 
 def _load_json(path: pathlib.Path) -> dict:
     with open(path) as fh:

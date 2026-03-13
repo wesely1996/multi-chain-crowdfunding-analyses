@@ -59,7 +59,7 @@ SCHEMA_VERSION = "2"
 
 def throughput_evm_client(client: str, variant: str, env_name: str, deploy_json: dict) -> dict:
     """Run N contribute() subprocesses sequentially and measure total time."""
-    ts_dir = str(config.REPO_ROOT / "clients" / "ts-evm")
+    ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-evm")
 
@@ -122,7 +122,7 @@ def throughput_evm_client(client: str, variant: str, env_name: str, deploy_json:
     except Exception:
         chain_id = deploy_json.get("chain_id")
 
-    client_label = "ts-evm" if use_ts else "dotnet"
+    client_label = "ts" if use_ts else "dotnet"
     result = {
         "schema_version": SCHEMA_VERSION,
         "variant": variant,
@@ -202,7 +202,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
     import asyncio
     import tempfile
 
-    ts_dir = str(config.REPO_ROOT / "clients" / "ts-evm")
+    ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-solana")
 
@@ -331,7 +331,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
         latencies = [r["latency_ms"] for r in per_tx_records if r["latency_ms"] is not None]
         proc_times = [r["process_elapsed_ms"] for r in per_tx_records]
 
-        client_label = "ts-solana" if use_ts else "dotnet"
+        client_label = "ts" if use_ts else "dotnet"
         return {
             "schema_version": SCHEMA_VERSION,
             "variant": variant,

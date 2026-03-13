@@ -1,8 +1,8 @@
 # Environment Setup
 
-## EVM (Windows — native)
+## EVM
 
-All EVM work runs natively on Windows via Node.js.
+All EVM work runs on Node.js (Linux, macOS, or Windows).
 
 ### Install and compile
 
@@ -120,10 +120,9 @@ The Hardhat network is pre-configured with 60 accounts (1 deployer + 59 contribu
 
 Record benchmark output in `docs/measurements.md` for the thesis gas comparison table.
 
-## Solana (WSL required on Windows)
+## Solana
 
-The Solana/Anchor toolchain does **not** support native Windows.
-Use WSL 2 (Ubuntu 22.04 recommended).
+The Solana/Anchor toolchain runs on Linux and macOS. On Windows, use WSL 2 (Ubuntu 22.04 recommended). On native Ubuntu/Linux, run the commands below directly — no WSL needed.
 
 ### Install WSL on Windows
 
@@ -335,12 +334,12 @@ Two integration clients interact with both EVM and Solana contracts. They execut
 full lifecycle (create, contribute, finalize, withdraw, refund, status) and emit
 structured JSON output with txHash, gasUsed/fee, and timing data.
 
-### TypeScript + viem (`clients/ts-evm/`)
+### TypeScript + viem (`clients/ts/`)
 
 #### Install
 
 ```bash
-cd clients/ts-evm
+cd clients/ts
 npm install
 ```
 
@@ -356,7 +355,7 @@ Required Solana variables: `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `SOLANA_PROG
 
 #### EVM commands
 
-All scripts use `tsx` for ESM execution. Run from `clients/ts-evm/`:
+All scripts use `tsx` for ESM execution. Run from `clients/ts/`:
 
 ```bash
 npm run create-campaign                          # defaults: softCap=100e6, hardCap=500e6, 30 days, [30,30,40]
@@ -493,13 +492,13 @@ npx hardhat run scripts/deploy.ts --network localhost
 ```
 
 Copy the deployed addresses (`MockERC20`, `CrowdfundingFactory`, `CrowdfundingCampaign`)
-into the `.env` files for both `clients/ts-evm/` and `clients/dotnet/`.
+into the `.env` files for both `clients/ts/` and `clients/dotnet/`.
 
 Then run the full lifecycle in order:
 
 ```bash
 # ── TypeScript client ──
-cd clients/ts-evm
+cd clients/ts
 npm run create-campaign
 npm run contribute -- --amount 10000000
 # (repeat contribute or advance time via Hardhat RPC to pass deadline)
@@ -550,7 +549,7 @@ spl-token create-token --decimals 6
 # Note the mint address → set as SOLANA_PAYMENT_MINT in .env
 ```
 
-Update `.env` files in both `clients/ts-evm/` and `clients/dotnet/` with:
+Update `.env` files in both `clients/ts/` and `clients/dotnet/` with:
 
 - `SOLANA_PROGRAM_ID` — from `anchor deploy` output
 - `SOLANA_PAYMENT_MINT` — from `spl-token create-token` output
@@ -560,7 +559,7 @@ Then run the lifecycle:
 
 ```bash
 # ── TypeScript client ──
-cd clients/ts-evm
+cd clients/ts
 npm run sol:create-campaign
 # Copy the campaignAddress from output → set SOLANA_CAMPAIGN_ADDRESS in .env or pass --campaign
 
@@ -588,7 +587,7 @@ node and compare the JSON output:
 
 ```bash
 # EVM — gasUsed must be identical for the same operation
-cd clients/ts-evm && npm run status 2>/dev/null | jq .data.totalRaised
+cd clients/ts && npm run status 2>/dev/null | jq .data.totalRaised
 cd clients/dotnet && dotnet run -- status 2>/dev/null | jq .data.totalRaised
 # Both should return the same value
 
@@ -606,13 +605,30 @@ records per-operation cost and latency, and prints a cross-chain comparison tabl
 
 ### Prerequisites
 
-- **Native Windows Python 3.12** (not MSYS2 Python — MSYS2 creates Unix-style
-  venvs that don't work in PowerShell, and lacks `pywin32` wheels)
-- If you only have Python 3.14: `winget install Python.Python.3.12`
+- Python 3.12 (3.11–3.13 also work; 3.14 is untested)
 - Hardhat node running for EVM benchmarks
 - `solana-test-validator` running + program deployed for Solana benchmarks
 
-### Install (PowerShell)
+### Install (Ubuntu / Linux)
+
+On Linux, prebuilt wheels exist for all dependencies — a standard venv install works:
+
+```bash
+cd benchmarks
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Verify:
+
+```bash
+python -c "from web3 import Web3; print('web3 OK')"
+python -c "import anchorpy; print('anchorpy OK')"
+python -c "import tabulate; print('tabulate OK')"
+```
+
+### Install (Windows — PowerShell)
 
 `web3==6.20.3` depends on `lru-dict<1.3.0` which has no prebuilt Windows wheel.
 `lru-dict==1.3.0` has a wheel and is API-identical — we force-install it.
@@ -653,7 +669,7 @@ python -c "import tabulate; print('tabulate OK')"
 >
 > | Warning                                            | Why it's fine                                             |
 > | -------------------------------------------------- | --------------------------------------------------------- |
-> | `web3 requires lru-dict<1.3.0, but you have 1.3.0` | API-identical; 1.2.x has no Windows wheel                 |
+> | `web3 requires lru-dict<1.3.0, but you have 1.3.0` | API-identical; 1.2.x has no Linux/Windows wheel for 1.2.x |
 > | `web3 requires pywin32>=223`                       | Only used for Windows IPC transport; we use HTTP JSON-RPC |
 
 ### Configuration
@@ -670,7 +686,7 @@ variables:
 | `SOLANA_PROGRAM_ID` | (from Anchor.toml)            | Deployed program ID                                      |
 | `N_CONTRIBUTIONS`   | `50`                          | Number of sequential contributions                       |
 | `VARIANT`           | `V1`                          | Contract variant tag: V1 ERC-20, V4 SPL, V2, V3, V5     |
-| `CLIENT`            | `python`                      | Client label: python, ts-evm, ts-solana, dotnet          |
+| `CLIENT`            | `python`                      | Client label: python, ts, dotnet                         |
 | `BENCHMARK_ENV`     | _(auto-detected)_             | Override environment label (e.g. `sepolia`, `solana-devnet`) |
 
 `BENCHMARK_ENV` is inferred from the RPC URL if not set: `infura`/`alchemy`/`sepolia`
@@ -740,16 +756,16 @@ python benchmarks/deploy_evm.py --variant V1 --env sepolia > /tmp/evm_deploy_sep
 
 #### `run_client_benchmark.py` — Lifecycle benchmark via TS or .NET clients
 
-Drives `npm run <op>` (ts-evm) or `dotnet run -- <op>` (dotnet) as subprocesses
+Drives `npm run <op>` (ts) or `dotnet run -- <op>` (dotnet) as subprocesses
 for each operation, parses their TxOutput JSON stdout, and writes a canonical
 schema v2 result file.
 
 ```bash
-# ts-evm client, V1, hardhat-localnet
+# ts client, V1, hardhat-localnet
 python benchmarks/run_client_benchmark.py \
     --platform evm --client ts --variant V1 --env hardhat-localnet \
     --deploy-json /tmp/evm_deploy.json
-# → benchmarks/results/V1_ts-evm_hardhat-localnet_lifecycle.json
+# → benchmarks/results/V1_ts_hardhat-localnet_lifecycle.json
 
 # dotnet client, V1, hardhat-localnet
 python benchmarks/run_client_benchmark.py \
@@ -757,13 +773,13 @@ python benchmarks/run_client_benchmark.py \
     --deploy-json /tmp/evm_deploy.json
 # → benchmarks/results/V1_dotnet_hardhat-localnet_lifecycle.json
 
-# ts-solana client, V4, solana-localnet
+# ts client, V4, solana-localnet
 python benchmarks/run_client_benchmark.py \
     --platform solana --client ts --variant V4 --env solana-localnet
-# → benchmarks/results/V4_ts-solana_solana-localnet_lifecycle.json
+# → benchmarks/results/V4_ts_solana-localnet_lifecycle.json
 ```
 
-> **Cross-client gas parity:** `ts-evm/contribute.ts` bundles `approve` + `contribute`
+> **Cross-client gas parity:** `ts/contribute.ts` bundles `approve` + `contribute`
 > gas in its top-level `gasUsed`. The runner reads `data.contributeGasUsed` instead,
 > so all clients report the same on-chain contribute gas for valid comparison.
 
@@ -777,7 +793,7 @@ Records both `latency_ms` (client-measured elapsed) and `process_elapsed_ms`
 python benchmarks/run_throughput_client.py \
     --platform evm --client ts --variant V1 --env hardhat-localnet \
     --deploy-json /tmp/evm_deploy.json
-# → benchmarks/results/V1_ts-evm_hardhat-localnet_throughput.json
+# → benchmarks/results/V1_ts_hardhat-localnet_throughput.json
 ```
 
 #### `collect_metrics.py` — Aggregate and compare
@@ -857,10 +873,10 @@ benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_{kind}.json
 
 Examples:
   V1_python_hardhat-localnet_lifecycle.json
-  V1_ts-evm_hardhat-localnet_lifecycle.json
+  V1_ts_hardhat-localnet_lifecycle.json
   V1_dotnet_hardhat-localnet_lifecycle.json
   V4_python_solana-localnet_lifecycle.json
-  V4_ts-solana_solana-localnet_lifecycle.json
+  V4_ts_solana-localnet_lifecycle.json
   V1_python_sepolia_lifecycle.json
   V4_python_solana-devnet_throughput.json
 ```
@@ -883,9 +899,9 @@ cd contracts/evm && npx hardhat node &
 # 2. Deploy contracts, capture addresses
 python benchmarks/deploy_evm.py --variant V1 > /tmp/evm_deploy.json
 
-# 3. Configure ts-evm client
-cp clients/ts-evm/.env.localnet clients/ts-evm/.env
-# Edit clients/ts-evm/.env and paste addresses from /tmp/evm_deploy.json:
+# 3. Configure ts client
+cp clients/ts/.env.localnet clients/ts/.env
+# Edit clients/ts/.env and paste addresses from /tmp/evm_deploy.json:
 #   FACTORY_ADDRESS=...  CAMPAIGN_ADDRESS=...  PAYMENT_TOKEN_ADDRESS=...
 
 # 4. Configure dotnet client
@@ -896,7 +912,7 @@ cp clients/dotnet/.env.localnet clients/dotnet/.env
 VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
 VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
 
-# 6. ts-evm lifecycle + throughput
+# 6. ts lifecycle + throughput
 python benchmarks/run_client_benchmark.py \
     --platform evm --client ts --variant V1 --env hardhat-localnet \
     --deploy-json /tmp/evm_deploy.json
@@ -924,14 +940,14 @@ Use the template files to avoid editing `.env` manually:
 
 | Template | Platform | Environment |
 | -------- | -------- | ----------- |
-| `clients/ts-evm/.env.localnet` | EVM + Solana | hardhat-localnet + solana-localnet |
-| `clients/ts-evm/.env.sepolia`  | EVM + Solana | Sepolia testnet + solana-devnet |
+| `clients/ts/.env.localnet` | EVM + Solana | hardhat-localnet + solana-localnet |
+| `clients/ts/.env.sepolia`  | EVM + Solana | Sepolia testnet + solana-devnet |
 | `clients/dotnet/.env.localnet` | EVM + Solana | hardhat-localnet + solana-localnet |
 | `clients/dotnet/.env.sepolia`  | EVM + Solana | Sepolia testnet + solana-devnet |
 
 ```bash
-# Example: switch ts-evm client to Sepolia
-cp clients/ts-evm/.env.sepolia clients/ts-evm/.env
+# Example: switch ts client to Sepolia
+cp clients/ts/.env.sepolia clients/ts/.env
 # Edit: paste YOUR_KEY, YOUR_PRIVATE_KEY, contract addresses from Sepolia deploy
 ```
 
@@ -970,7 +986,7 @@ These must be acknowledged in the thesis methodology section:
 | Anchor CLI              | 0.32.1          | Build, test, deploy (contracts/solana/)                |
 | anchor-lang             | 0.32.1          | Solana program framework                               |
 | anchor-spl              | 0.32.1          | SPL Token CPI helpers                                  |
-| @coral-xyz/anchor (TS)  | 0.30.1          | TS client Anchor SDK (clients/ts-evm/)                 |
+| @coral-xyz/anchor (TS)  | 0.32.1          | TS client Anchor SDK (clients/ts/)                 |
 | @solana/spl-token (TS)  | 0.3.11          | SPL token helpers                                      |
 | @solana/web3.js         | 1.95.4          | Solana RPC and transaction building                    |
 | viem                    | 2.21.x          | EVM client RPC and contract interaction                |
