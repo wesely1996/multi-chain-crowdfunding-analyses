@@ -6,13 +6,12 @@ pub mod state;
 
 use instructions::*;
 
-// WHY: placeholder ID — replaced by `anchor build` on first compile.
-// Run `anchor keys list` after build and update both this macro and
-// Anchor.toml [programs.localnet].
-declare_id!("BiVZkwVjTU1vBKa7TRQFU6w97NGBSK5xvuNdAaDtPHWU");
+// WHY: placeholder ID — replaced by `anchor keys sync` after first build.
+// Run `anchor keys list` and update both this macro and Anchor.toml [programs.localnet].
+declare_id!("46xPA3ukhGDwk1w9ZZGCmkmVWuRR1nT9Z3QsPrDNxRyy");
 
 #[program]
-pub mod crowdfunding {
+pub mod crowdfunding_token2022 {
     use super::*;
 
     pub fn initialize_campaign(

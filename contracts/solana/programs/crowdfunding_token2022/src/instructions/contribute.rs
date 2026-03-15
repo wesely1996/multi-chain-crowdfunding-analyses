@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer};
+use anchor_spl::token_2022::{self, MintTo, Token2022, Transfer};
+use anchor_spl::token_interface::{Mint, TokenAccount};
 
 use crate::errors::CrowdfundingError;
 use crate::state::{Campaign, ContributorRecord};
@@ -26,8 +27,9 @@ pub struct Contribute<'info> {
         mut,
         token::mint = campaign.payment_mint,
         token::authority = contributor,
+        token::token_program = token_program,
     )]
-    pub contributor_payment_ata: Box<Account<'info, TokenAccount>>,
+    pub contributor_payment_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -35,28 +37,34 @@ pub struct Contribute<'info> {
         bump = campaign.vault_bump,
         token::mint = campaign.payment_mint,
         token::authority = campaign,
+        token::token_program = token_program,
     )]
-    pub vault: Box<Account<'info, TokenAccount>>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
         payer = contributor,
         associated_token::mint = receipt_mint,
         associated_token::authority = contributor,
+        associated_token::token_program = token_program,
     )]
-    pub contributor_receipt_ata: Box<Account<'info, TokenAccount>>,
+    pub contributor_receipt_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
         seeds = [b"receipt_mint", campaign.key().as_ref()],
         bump = campaign.receipt_mint_bump,
+        mint::token_program = token_program,
     )]
-    pub receipt_mint: Box<Account<'info, Mint>>,
+    pub receipt_mint: Box<InterfaceAccount<'info, Mint>>,
 
-    #[account(address = campaign.payment_mint)]
-    pub payment_mint: Box<Account<'info, Mint>>,
+    #[account(
+        address = campaign.payment_mint,
+        mint::token_program = token_program,
+    )]
+    pub payment_mint: Box<InterfaceAccount<'info, Mint>>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
@@ -85,7 +93,7 @@ pub fn handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     let contributor_record_bump = ctx.bumps.contributor_record;
 
     // --- CPI: transfer payment tokens from contributor to vault ---
-    token::transfer(
+    token_2022::transfer(
         CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
@@ -118,7 +126,7 @@ pub fn handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
         campaign_id_bytes.as_ref(),
         &[bump],
     ];
-    token::mint_to(
+    token_2022::mint_to(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             MintTo {

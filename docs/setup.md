@@ -15,18 +15,23 @@ npx hardhat compile
 Expected output:
 
 ```
-Compiled 7 Solidity files successfully (evm target: paris)
+Compiled 12 Solidity files successfully (evm target: cancun)
 ```
+
+> The `evmVersion: "cancun"` setting is required because OZ v5 `ERC4626` uses `Memory.sol`
+> which relies on the `mcopy` opcode introduced in the Cancun hard fork (EIP-5656).
 
 ### Run tests
 
 ```bash
 npx hardhat test
-# or run a single test file:
-npx hardhat test test/CrowdfundingCampaign.test.ts
+# or run a single variant's tests:
+npx hardhat test test/CrowdfundingCampaign.test.ts      # V1 ERC-20 (21 tests + 3 factory)
+npx hardhat test test/CrowdfundingCampaign4626.test.ts  # V2 ERC-4626 (23 tests + 3 factory)
+npx hardhat test test/CrowdfundingCampaign1155.test.ts  # V3 ERC-1155 (24 tests + 3 factory)
 ```
 
-Tests use an in-process Hardhat network — no external node required.
+Tests use an in-process Hardhat network — no external node required. Total: **77 tests**.
 
 ### Deploy (local Hardhat network)
 
@@ -34,8 +39,9 @@ Tests use an in-process Hardhat network — no external node required.
 npx hardhat run scripts/deploy.ts
 ```
 
-Deploys `MockERC20`, `CrowdfundingFactory`, and one sample campaign.
-Prints a deployment summary table including all contract addresses.
+Deploys `MockERC20`, `CrowdfundingFactory` (V1), `CrowdfundingFactory4626` (V2), and
+`CrowdfundingFactory1155` (V3), each with one sample campaign.
+Prints three deployment summary tables including all contract and tier-token addresses.
 
 ### Deploy (external network — Sepolia)
 
@@ -107,14 +113,16 @@ npx hardhat run scripts/deploy.ts --network sepolia
 npx hardhat run scripts/benchmark.ts
 ```
 
-Runs a full 50-contributor sequential scenario on the in-process Hardhat network:
+Runs the same 50-contributor sequential scenario for all three EVM variants (V1 ERC-20,
+V2 ERC-4626, V3 ERC-1155 Bronze tier) on the in-process Hardhat network, then prints a
+side-by-side comparison table:
 
-1. Deploys `MockERC20` + `CrowdfundingFactory` + one campaign (hardCap = 500 USDC, milestones [30%, 30%, 40%])
-2. Mints and contributes 10 USDC from each of 50 signers (records `gasUsed` per tx)
-3. Advances block time past the deadline (`evm_increaseTime`)
-4. Calls `finalize()` (records gas)
-5. Calls `withdrawMilestone()` × 3 (records gas each)
-6. Prints avg / min / max gas table
+1. Deploy `MockERC20` + factory + campaign for each variant (sequentially)
+2. Mint and contribute from each of 50 signers — record `gasUsed` per tx
+3. Advance block time past deadline (`evm_increaseTime`)
+4. Call `finalize()` — record gas
+5. Call `withdrawMilestone()` × 3 — record gas each
+6. Print avg / min / max and side-by-side cross-variant comparison table
 
 The Hardhat network is pre-configured with 60 accounts (1 deployer + 59 contributors) in `hardhat.config.ts`.
 
@@ -979,8 +987,8 @@ These must be acknowledged in the thesis methodology section:
 | Node.js                 | 20.x LTS        | All TypeScript tooling                                 |
 | TypeScript              | 5.4.x           | EVM + Solana clients                                   |
 | Hardhat                 | 2.22.x          | EVM compilation, testing, local node                   |
-| @openzeppelin/contracts | 5.1.x           | ERC-20 base implementation                             |
-| Solidity                | 0.8.20          | EVM contract compiler                                  |
+| @openzeppelin/contracts | 5.1.x           | ERC-20, ERC-4626, ERC-1155 base implementations        |
+| Solidity                | 0.8.24          | EVM contract compiler (Cancun EVM target)              |
 | Rust                    | stable (1.84+)  | Solana program compilation                             |
 | Solana CLI              | 3.0.15 (stable) | Program deployment, account inspection                 |
 | Anchor CLI              | 0.32.1          | Build, test, deploy (contracts/solana/)                |

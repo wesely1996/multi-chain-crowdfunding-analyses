@@ -10,13 +10,15 @@ read alongside `docs/scope.md` and `docs/setup.md`.
 
 Two blockchain platforms implement an identical crowdfunding state machine:
 
-| Dimension | EVM (Solidity 0.8.20) | Solana (Anchor 0.32.1) |
-|-----------|----------------------|------------------------|
-| Token standard | ERC-20 receipt token per campaign | SPL Token (fungible) |
-| Deployment model | One contract per campaign (singleton) | One program; one Campaign PDA per campaign |
-| Payment asset | ERC-20 token (stablecoin, e.g. USDC) | SPL token (payment_mint) |
-| Finality model | Probabilistic (~12 s on mainnet) | Optimistic (400 ms slots, ~2–3 s hard finality) |
-| Toolchain | Hardhat 2.22.x, viem | Anchor 0.32.1, @solana/web3.js |
+| Dimension | EVM V1 (ERC-20) | EVM V2 (ERC-4626) | EVM V3 (ERC-1155) | Solana V4 (SPL) | Solana V5 (Token-2022) |
+|-----------|-----------------|-------------------|-------------------|-----------------|------------------------|
+| Token standard | ERC-20 receipt token per campaign | ERC-4626 — campaign IS the vault share token | ERC-1155 — one token ID per tier (Bronze/Silver/Gold) | SPL Token (fungible) | Token-2022 (fungible, `TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`) |
+| Deployment model | One singleton per campaign + separate `CampaignToken` | One singleton per campaign (no separate token) | One singleton per campaign + separate `CampaignTierToken` | One program; one Campaign PDA per campaign | Separate Anchor program (`crowdfunding_token2022`); one Campaign PDA per campaign |
+| Payment asset | ERC-20 (e.g. USDC) | ERC-20 (`asset()`) | ERC-20 | SPL token (`payment_mint`) | Token-2022 mint (`payment_mint`) |
+| Contribute signature | `contribute(uint256 amount)` | `contribute(uint256 amount)` | `contribute(uint256 tierId)` | `contribute(u64 amount)` | `contribute(u64 amount)` |
+| Refund signature | `refund()` | `refund()` | `refund(uint256 tierId)` | `refund()` | `refund()` |
+| Finality model | Probabilistic (~12 s mainnet) | Probabilistic (~12 s mainnet) | Probabilistic (~12 s mainnet) | Optimistic (400 ms slots, ~2–3 s finality) | Optimistic (400 ms slots, ~2–3 s finality) |
+| Solidity / Toolchain | 0.8.24 / Hardhat 2.22.x | 0.8.24 / Hardhat 2.22.x | 0.8.24 / Hardhat 2.22.x | Anchor 0.32.1 / @solana/web3.js | Anchor 0.32.1 / @solana/web3.js |
 
 Both variants expose the same lifecycle — `create → fund → finalize → success/fail` — with
 identical campaign parameters, invariants, and event semantics. This controlled parallelism is
@@ -107,17 +109,22 @@ Runtime mutable fields:
 
 ## 4. Function / Instruction Mapping
 
-| EVM Function | Solana Instruction | Caller | Description |
-|--------------|--------------------|--------|-------------|
-| `createCampaign(...)` (via Factory) | `initialize_campaign(...)` | Anyone (deployer) | Initialise campaign with parameters |
-| `contribute(amount)` | `contribute(amount)` | Any signer | Contribute; mint receipt tokens |
-| `finalize()` | `finalize()` | Anyone (permissionless) | Compute outcome after deadline |
-| `withdrawMilestone()` | `withdraw_milestone()` | Creator only | Release next milestone tranche to creator |
-| `refund()` | `refund()` | Contributor | Return contribution if campaign failed |
+| EVM V1 Function | EVM V2 Function | EVM V3 Function | Solana V4/V5 Instruction | Caller | Description |
+|-----------------|-----------------|-----------------|--------------------------|--------|-------------|
+| `createCampaign(...)` via Factory | `createCampaign(...)` via Factory4626 | `createCampaign(...)` via Factory1155 | `initialize_campaign(...)` | Anyone (deployer) | Initialise campaign |
+| `contribute(amount)` | `contribute(amount)` | `contribute(tierId)` | `contribute(amount)` | Any signer | Contribute; mint receipt / vault share / tier token |
+| `finalize()` | `finalize()` | `finalize()` | `finalize()` | Anyone (permissionless) | Compute outcome after deadline |
+| `withdrawMilestone()` | `withdrawMilestone()` | `withdrawMilestone()` | `withdraw_milestone()` | Creator only | Release next milestone tranche |
+| `refund()` | `refund()` | `refund(tierId)` | `refund()` | Contributor | Return contribution if campaign failed |
 
-> **Naming rationale**: Both platforms use the same verb roots (`contribute`, `finalize`, `refund`,
-> `withdrawMilestone` / `withdraw_milestone`) for improved cross-chain mental mapping. EVM uses
-> camelCase per Solidity convention; Solana uses snake_case per Rust convention.
+> **V4 vs V5 instruction parity**: V5 (`crowdfunding_token2022`) exposes identical instructions with the same signatures as V4 (`crowdfunding`). The only differences are internal: V5 uses `anchor_spl::token_2022` CPI calls, `Token2022` program type, and `anchor_spl::token_interface::{Mint, TokenAccount}` interface types. PDA seeds, account layouts, and business logic are unchanged.
+
+> **V3 refund(tierId):** ERC-1155 refunds are per-tier. A contributor who holds Bronze and Silver
+> tokens can refund Bronze (tierId=0) without affecting their Silver holding. Multiple refund calls
+> are required to recover multiple tier contributions.
+
+> **Naming rationale**: All variants use the same verb roots (`contribute`, `finalize`, `refund`,
+> `withdrawMilestone`) for cross-variant mental mapping.
 
 ---
 
@@ -210,6 +217,95 @@ CrowdfundingCampaign.sol storage
 
 Solidity 0.8.x reverts on integer overflow by default. No `SafeMath` import is required.
 The optimizer is enabled at `runs: 200` (balanced deploy/call cost).
+
+---
+
+## 5a. EVM V2 Storage Layout (ERC-4626)
+
+`CrowdfundingCampaign4626` extends OZ `ERC4626` (which extends `ERC20`). The campaign
+contract IS the vault share token — no `receiptToken` field is needed.
+
+```
+CrowdfundingCampaign4626.sol storage (inherits ERC20 + ERC4626 slots)
+┌─────────────────────────────────────────────────────────────────┐
+│ ERC20 inherited storage (OZ internal)                           │
+│   mapping(address => uint256) _balances   (share balances)      │
+│   mapping(address => ...) _allowances                           │
+│   uint256 _totalSupply                                          │
+│   string  _name, _symbol                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ ERC4626 inherited storage                                        │
+│   IERC20 _asset          (underlying payment token)             │
+│   uint8  _underlyingDecimals                                    │
+├─────────────────────────────────────────────────────────────────┤
+│ Campaign immutables (bytecode)                                   │
+│   address   creator                                             │
+│   uint256   softCap, hardCap, deadline                          │
+├─────────────────────────────────────────────────────────────────┤
+│ Campaign storage (identical slot layout to V1)                   │
+│   slot 0:  uint256  totalRaised                                 │
+│   slot 1:  bool     finalized + bool successful + uint8 current │
+│   slot 2:  uint256  totalWithdrawn                              │
+│   uint8[]  milestonePercentages (dynamic)                       │
+│   mapping(address => uint256) contributions                     │
+│ (no receiptToken field — campaign IS the ERC-20 share token)    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key V2 design choices:**
+- Standard ERC-4626 entry points disabled: `deposit`, `mint`, `withdraw`, `redeem` → revert
+- `maxDeposit / maxMint / maxWithdraw / maxRedeem` → return 0
+- `contribute(amount)` calls `_mint` directly; `refund()` calls `_burn` directly
+- `asset()` (from ERC4626) replaces `paymentToken` — returns address of underlying token
+
+---
+
+## 5b. EVM V3 Storage Layout (ERC-1155)
+
+`CrowdfundingCampaign1155` does not extend any token standard — it deploys a separate
+`CampaignTierToken` (ERC-1155) and holds a reference to it.
+
+```
+CrowdfundingCampaign1155.sol storage
+┌─────────────────────────────────────────────────────────────────┐
+│ Immutables (bytecode)                                           │
+│   address   creator                                             │
+│   IERC20    paymentToken                                        │
+│   uint256   softCap, hardCap, deadline                          │
+├─────────────────────────────────────────────────────────────────┤
+│ Storage (same base slots as V1)                                 │
+│   slot 0:  uint256  totalRaised                                 │
+│   slot 1:  bool     finalized + bool successful + uint8 current │
+│   slot 2:  uint256  totalWithdrawn                              │
+│   uint8[]  milestonePercentages (dynamic)                       │
+│   mapping(address => uint256) contributions  (total USDC)       │
+├─────────────────────────────────────────────────────────────────┤
+│ Tier-specific storage                                           │
+│   Tier[3]  tiers  (price: uint256, name: string)               │
+│   CampaignTierToken  tierToken   (ERC-1155 contract reference)  │
+│   mapping(address => mapping(uint256 => uint256))               │
+│       tierContributions  (contributor → tierId → count held)    │
+└─────────────────────────────────────────────────────────────────┘
+
+CampaignTierToken.sol (separate contract, extends ERC1155)
+┌─────────────────────────────────────────────────────────────────┐
+│   address  campaign  (immutable; only this address may mint/burn)│
+│   ERC1155 inherited storage (_balances, etc.)                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Tier IDs:**
+| ID | Name | Example price |
+|----|------|--------------|
+| 0 | Bronze | 100 USDC |
+| 1 | Silver | 500 USDC |
+| 2 | Gold | 1,000 USDC |
+
+**Key V3 design choices:**
+- `contribute(tierId)` derives `amount = tiers[tierId].price`; rejects `tierId >= 3`
+- `refund(tierId)` is per-tier; each call burns 1 ERC-1155 token and returns one tier price
+- `contributions[addr]` (total USDC) tracks the aggregate for softCap/hardCap accounting
+- `tierContributions[addr][tierId]` tracks how many tokens of each tier the contributor holds
 
 ---
 
@@ -434,3 +530,39 @@ Anchor emits structured logs via the `emit!` macro (on-chain CPI event log).
 | **Options considered** | (A) Fixed equal splits (e.g. 50/50); (B) Configurable percentage array summing to 100; (C) Configurable absolute amounts |
 | **Tradeoffs** | Fixed splits: trivial to implement, zero configuration surface. Array of percentages: flexible, supports 1-to-N milestones, requires sum validation. Absolute amounts: requires knowing `hardCap` is reached, creates rounding complexity |
 | **Why chosen** | The thesis canonical lifecycle specifies milestone-based withdrawal. A fixed split cannot model a single-milestone campaign or a campaign with unequal tranches. Percentages are human-readable and bounded (0–100). Absolute amounts couple milestone config to fundraise outcome, which breaks the `softCap < hardCap` scenario |
+
+### D-V2-1 — ERC-4626 Campaign as Its Own Share Token
+
+| | Detail |
+|-|--------|
+| **Decision** | The campaign contract extends `ERC4626`; the campaign IS the vault share token. No separate `CampaignToken` is deployed. |
+| **Options considered** | (A) Campaign holds a reference to a separate ERC-4626 vault; (B) Campaign IS the ERC-4626 vault token |
+| **Tradeoffs** | Separate vault: cleaner separation of concerns, but adds one deploy + one contract interaction per operation. Campaign as vault: eliminates the separate `CampaignToken` deployment cost (~500k gas), reduces address count, and makes `campaign.balanceOf(contributor)` directly readable. Disabling standard ERC-4626 entry points adds code surface but removes ambiguity. |
+| **Why chosen** | The thesis benchmarks deployment cost and per-operation cost. Eliminating the separate token deployment is a measurable V2 benefit over V1. It also matches the semantic intent of ERC-4626: the "vault" here is the campaign itself |
+
+### D-V2-2 — Disabling Standard ERC-4626 Entry Points
+
+| | Detail |
+|-|--------|
+| **Decision** | Override `deposit`, `mint`, `withdraw`, `redeem` to revert with `UseContributeInstead` / `UseRefundInstead`. Override `maxDeposit/maxMint/maxWithdraw/maxRedeem` → 0. |
+| **Options considered** | (A) Allow standard ERC-4626 entry points to function alongside `contribute`/`refund`; (B) Disable all standard entry points |
+| **Tradeoffs** | Allowing standard entry points: a contributor could deposit via standard ERC-4626 paths, bypassing the `hardCap` and deadline guards — a security hole. Disabling: increases code size but eliminates the bypass attack surface entirely |
+| **Why chosen** | Security over convenience. Standard ERC-4626 callers (DeFi routers, aggregators) that check `maxDeposit == 0` will correctly determine this vault does not accept deposits, preventing accidental fund loss |
+
+### D-V3-1 — Fixed 3-Tier ERC-1155 Schema
+
+| | Detail |
+|-|--------|
+| **Decision** | Three fixed tiers stored in `Tier[3]` (Bronze/Silver/Gold). Tier prices set at campaign creation. |
+| **Options considered** | (A) Dynamic N tiers (variable-length array); (B) Fixed 3 tiers; (C) Fixed 3 tiers with per-tier supply caps |
+| **Tradeoffs** | Dynamic N tiers: more flexible but complicates refund loop and gas estimation. Fixed 3 tiers: bounded gas on all operations, simpler storage layout, sufficient for thesis comparison. Per-tier supply caps: out of scope |
+| **Why chosen** | Three tiers is the canonical crowdfunding tier model (e.g. Bronze/Silver/Gold reward tiers on Kickstarter). Fixing the count at 3 makes the `Tier[3]` storage layout deterministic and keeps `InvalidTierId` checking trivial (`tierId >= 3`). Adding more tiers would not change the architectural conclusion |
+
+### D-V3-2 — Per-Tier Refund vs Full Refund
+
+| | Detail |
+|-|--------|
+| **Decision** | `refund(uint256 tierId)` refunds one unit of the specified tier. Contributors must call refund once per tier to recover all contributions. |
+| **Options considered** | (A) `refund()` (no argument) — refunds all tiers atomically; (B) `refund(tierId)` — per-tier, caller chooses order |
+| **Tradeoffs** | Atomic refund: simpler UX (one call), but requires iterating over all tiers on-chain — bounded gas only if tier count is fixed. Per-tier: slightly higher UX burden but aligns with the ERC-1155 token model where each tier is a distinct token, and allows partial refund of one tier while keeping others |
+| **Why chosen** | Per-tier refund matches the ERC-1155 semantics (each tier token is independently held and burned). It also enables the partial-refund test case which demonstrates a unique V3 capability vs. V1/V2. With only 3 tiers, the UX burden (≤3 calls) is acceptable |

@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/crowdfunding"]
+members = ["programs/crowdfunding", "programs/crowdfunding_token2022"]
 resolver = "2"
 
 [profile.release]

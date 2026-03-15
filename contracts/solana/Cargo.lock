@@ -573,6 +573,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crowdfunding_token2022"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "blake3",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

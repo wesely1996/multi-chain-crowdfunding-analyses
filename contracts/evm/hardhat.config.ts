@@ -9,12 +9,15 @@ const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL ?? "";
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.20",
+    version: "0.8.24",
     settings: {
       optimizer: {
         enabled: true,
         runs: 200,
       },
+      // WHY cancun: OZ v5.x ERC4626 uses Memory.sol which relies on the `mcopy` opcode
+      // introduced in the Cancun hard fork (EIP-5656). Without this, compilation fails.
+      evmVersion: "cancun",
     },
   },
   networks: {

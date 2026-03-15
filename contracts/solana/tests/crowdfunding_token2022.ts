@@ -1,8 +1,8 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { Crowdfunding } from "../target/types/crowdfunding";
+import { CrowdfundingToken2022 } from "../target/types/crowdfunding_token2022";
 import {
-  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createMint,
   getOrCreateAssociatedTokenAccount,
@@ -20,11 +20,11 @@ import { expect } from "chai";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe("crowdfunding", () => {
+describe("crowdfunding_token2022", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.Crowdfunding as Program<Crowdfunding>;
+  const program = anchor.workspace.CrowdfundingToken2022 as Program<CrowdfundingToken2022>;
   const connection = provider.connection;
   // NodeWallet exposes .payer; cast to any to avoid type noise.
   const payer: Keypair = (provider.wallet as any).payer;
@@ -81,10 +81,10 @@ describe("crowdfunding", () => {
   let paymentMint: PublicKey;
 
   // Campaign IDs (one per campaign so PDAs don't collide).
-  const ID_SUCCESS = new anchor.BN(1);   // 60-second deadline; used in tests 1–4, 9
-  const ID_EXPIRED = new anchor.BN(3);   // 2-second deadline; test 3 only
+  const ID_SUCCESS = new anchor.BN(1);        // 60-second deadline; used in tests 1–4, 9
+  const ID_EXPIRED = new anchor.BN(3);        // 2-second deadline; test 3 only
   const ID_SHORT_SUCCESS = new anchor.BN(10); // 2-second deadline; tests 5, 7
-  const ID_FAIL = new anchor.BN(2);      // 2-second deadline; tests 6, 8
+  const ID_FAIL = new anchor.BN(2);           // 2-second deadline; tests 6, 8
 
   let successCampaign: PublicKey;
   let shortSuccessCampaign: PublicKey;
@@ -94,20 +94,23 @@ describe("crowdfunding", () => {
   // ─── before hook ───────────────────────────────────────────────────────────
 
   before(async () => {
-    // Fund creator, contributor, and wallet (payer) on localnet.
+    // Fund creator and contributor on localnet.
     await Promise.all([
       connection.requestAirdrop(creator.publicKey, 10e9),
       connection.requestAirdrop(contributor.publicKey, 10e9),
     ]);
     await sleep(2000);
 
-    // Create 6-decimal payment mint (USDC-like).
+    // Create 6-decimal payment mint as Token-2022 mint.
     paymentMint = await createMint(
       connection,
       payer,
       payer.publicKey, // mintAuthority
       null,            // freezeAuthority
-      6
+      6,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
 
     // Mint 1 000 tokens (1e9 units) to contributor.
@@ -115,7 +118,11 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     await mintTo(
       connection,
@@ -123,7 +130,10 @@ describe("crowdfunding", () => {
       paymentMint,
       contributorPaymentAta.address,
       payer,
-      1_000_000_000
+      1_000_000_000,
+      [],
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     await sleep(1000);
   });
@@ -150,7 +160,7 @@ describe("crowdfunding", () => {
         paymentMint,
         vault,
         receiptMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
       })
@@ -180,13 +190,21 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     const contribReceiptAta = await getOrCreateAssociatedTokenAccount(
       connection,
       payer,
       receiptMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
 
     const amount = new anchor.BN(200_000_000); // 200 tokens — exceeds softCap
@@ -202,7 +220,7 @@ describe("crowdfunding", () => {
         contributorReceiptAta: contribReceiptAta.address,
         receiptMint,
         paymentMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
@@ -210,10 +228,10 @@ describe("crowdfunding", () => {
       .signers([contributor])
       .rpc();
 
-    const vaultInfo = await getAccount(connection, vault);
+    const vaultInfo = await getAccount(connection, vault, undefined, TOKEN_2022_PROGRAM_ID);
     expect(Number(vaultInfo.amount)).to.equal(200_000_000);
 
-    const receiptInfo = await getAccount(connection, contribReceiptAta.address);
+    const receiptInfo = await getAccount(connection, contribReceiptAta.address, undefined, TOKEN_2022_PROGRAM_ID);
     expect(Number(receiptInfo.amount)).to.equal(200_000_000);
 
     const record = await program.account.contributorRecord.fetch(contributorRecord);
@@ -242,7 +260,7 @@ describe("crowdfunding", () => {
         paymentMint,
         vault,
         receiptMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
       })
@@ -260,11 +278,17 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     const contribReceiptAta = getAssociatedTokenAddressSync(
       receiptMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
     );
 
     try {
@@ -279,7 +303,7 @@ describe("crowdfunding", () => {
           contributorReceiptAta: contribReceiptAta,
           receiptMint,
           paymentMint,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
@@ -311,11 +335,17 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     const contribReceiptAta = getAssociatedTokenAddressSync(
       receiptMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
     );
 
     try {
@@ -330,7 +360,7 @@ describe("crowdfunding", () => {
           contributorReceiptAta: contribReceiptAta,
           receiptMint,
           paymentMint,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
@@ -346,6 +376,8 @@ describe("crowdfunding", () => {
   // ─── Test 5: finalize when total >= softCap → successful = true ──────────
 
   it("5. finalize sets successful = true when total_raised >= softCap", async () => {
+    // Use on-chain block time (not wall clock) so the deadline is relative to the
+    // validator's actual clock — avoids skew when V5 tests run on a fresh validator.
     const slot = await connection.getSlot();
     const onChainNow = (await connection.getBlockTime(slot))!;
     shortSuccessCampaign = findCampaignPda(creator.publicKey, ID_SHORT_SUCCESS);
@@ -357,7 +389,7 @@ describe("crowdfunding", () => {
         ID_SHORT_SUCCESS,
         new anchor.BN(100_000_000),
         new anchor.BN(500_000_000),
-        new anchor.BN(onChainNow + 4), // 4-second deadline
+        new anchor.BN(onChainNow + 4), // 4-second deadline relative to validator clock
         Buffer.from([100])      // single milestone — full sweep
       )
       .accounts({
@@ -366,7 +398,7 @@ describe("crowdfunding", () => {
         paymentMint,
         vault,
         receiptMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
       })
@@ -382,13 +414,21 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     const contribReceiptAta = await getOrCreateAssociatedTokenAccount(
       connection,
       payer,
       receiptMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
 
     await program.methods
@@ -402,7 +442,7 @@ describe("crowdfunding", () => {
         contributorReceiptAta: contribReceiptAta.address,
         receiptMint,
         paymentMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
@@ -429,6 +469,7 @@ describe("crowdfunding", () => {
   // ─── Test 6: finalize when total < softCap → successful = false ──────────
 
   it("6. finalize sets successful = false when total_raised < softCap", async () => {
+    // Use on-chain block time for the same reason as test 5.
     const slot = await connection.getSlot();
     const onChainNow = (await connection.getBlockTime(slot))!;
     failCampaign = findCampaignPda(creator.publicKey, ID_FAIL);
@@ -440,7 +481,7 @@ describe("crowdfunding", () => {
         ID_FAIL,
         new anchor.BN(100_000_000),
         new anchor.BN(500_000_000),
-        new anchor.BN(onChainNow + 4), // 4-second deadline
+        new anchor.BN(onChainNow + 15), // 15-second deadline — ATA creation takes a few seconds
         Buffer.from([100])
       )
       .accounts({
@@ -449,7 +490,7 @@ describe("crowdfunding", () => {
         paymentMint,
         vault,
         receiptMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
       })
@@ -465,13 +506,21 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     const contribReceiptAta = await getOrCreateAssociatedTokenAccount(
       connection,
       payer,
       receiptMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
 
     await program.methods
@@ -485,7 +534,7 @@ describe("crowdfunding", () => {
         contributorReceiptAta: contribReceiptAta.address,
         receiptMint,
         paymentMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
@@ -494,7 +543,7 @@ describe("crowdfunding", () => {
       .rpc();
 
     // Wait for deadline.
-    await sleep(6000);
+    await sleep(12000);
 
     await program.methods
       .finalize()
@@ -518,11 +567,15 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      creator.publicKey
+      creator.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
 
-    const vaultBefore = await getAccount(connection, vault);
-    const creatorBefore = await getAccount(connection, creatorPaymentAta.address);
+    const vaultBefore = await getAccount(connection, vault, undefined, TOKEN_2022_PROGRAM_ID);
+    const creatorBefore = await getAccount(connection, creatorPaymentAta.address, undefined, TOKEN_2022_PROGRAM_ID);
 
     await program.methods
       .withdrawMilestone()
@@ -532,13 +585,13 @@ describe("crowdfunding", () => {
         vault,
         creatorPaymentAta: creatorPaymentAta.address,
         paymentMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
       })
       .signers([creator])
       .rpc();
 
-    const vaultAfter = await getAccount(connection, vault);
-    const creatorAfter = await getAccount(connection, creatorPaymentAta.address);
+    const vaultAfter = await getAccount(connection, vault, undefined, TOKEN_2022_PROGRAM_ID);
+    const creatorAfter = await getAccount(connection, creatorPaymentAta.address, undefined, TOKEN_2022_PROGRAM_ID);
 
     // Single milestone [100] → full vault sweep.
     expect(Number(vaultAfter.amount)).to.equal(0);
@@ -564,17 +617,25 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     const contribReceiptAta = await getOrCreateAssociatedTokenAccount(
       connection,
       payer,
       receiptMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
 
-    const paymentBefore = await getAccount(connection, contribPaymentAta.address);
-    const receiptBefore = await getAccount(connection, contribReceiptAta.address);
+    const paymentBefore = await getAccount(connection, contribPaymentAta.address, undefined, TOKEN_2022_PROGRAM_ID);
+    const receiptBefore = await getAccount(connection, contribReceiptAta.address, undefined, TOKEN_2022_PROGRAM_ID);
     expect(Number(receiptBefore.amount)).to.equal(50_000_000); // sanity
 
     await program.methods
@@ -587,14 +648,14 @@ describe("crowdfunding", () => {
         contributorReceiptAta: contribReceiptAta.address,
         vault,
         receiptMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .signers([contributor])
       .rpc();
 
-    const paymentAfter = await getAccount(connection, contribPaymentAta.address);
-    const receiptAfter = await getAccount(connection, contribReceiptAta.address);
+    const paymentAfter = await getAccount(connection, contribPaymentAta.address, undefined, TOKEN_2022_PROGRAM_ID);
+    const receiptAfter = await getAccount(connection, contribReceiptAta.address, undefined, TOKEN_2022_PROGRAM_ID);
 
     expect(
       Number(paymentAfter.amount) - Number(paymentBefore.amount)
@@ -616,11 +677,17 @@ describe("crowdfunding", () => {
       connection,
       payer,
       paymentMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
     const contribReceiptAta = getAssociatedTokenAddressSync(
       receiptMint,
-      contributor.publicKey
+      contributor.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
     );
 
     try {
@@ -634,7 +701,7 @@ describe("crowdfunding", () => {
           contributorReceiptAta: contribReceiptAta,
           vault,
           receiptMint,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
         .signers([contributor])

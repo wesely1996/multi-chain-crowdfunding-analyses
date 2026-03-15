@@ -102,6 +102,156 @@ from the previous transaction's access list. [assumption]
 
 ---
 
+## V2 — EVM / ERC-4626 Vault Shares
+
+### M-V2-1 · Local Hardhat Network — Gas Benchmark
+
+**Date:** 2026-03-15
+**Environment:** Hardhat in-process EVM (local network, no external node)
+**Solidity version:** 0.8.24
+**EVM target:** cancun
+**Optimizer:** enabled, 200 runs
+**Script:** `contracts/evm/scripts/benchmark.ts` (V2 benchmark cycle)
+
+#### Scenario Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Payment token | MockERC20 ("Mock USDC", 6 decimals) |
+| Contribution per contributor | 10 USDC (10,000,000 raw units) |
+| `softCap` | 100 USDC |
+| `hardCap` | 500 USDC |
+| Milestone schedule | [30%, 30%, 40%] |
+| Contributors (`N`) | 50 (sequential, distinct EOAs) |
+| Deadline | 30 days (advanced via `evm_increaseTime`) |
+
+#### 4.1 `contribute()` — Sequential Gas Consumption (N = 50)
+
+| Metric | Gas Units |
+|--------|----------:|
+| `G_avg` | 97,806 |
+| `G_min` | 96,780 |
+| `G_max` | 148,080 |
+| `G_total` | 4,890,300 |
+
+**Observation — V2 lower than V1 [fact]:**
+ERC-4626 V2 contribute saves approximately 5,400 gas avg vs. V1 (103,226 → 97,806, −5.2%).
+The saving comes from eliminating the external call to a separate `CampaignToken.mint()` — V2
+calls `_mint` on itself (one internal call vs. two cross-contract CALL operations in V1).
+The cold/warm SSTORE spread is preserved (148,080 max vs. 96,780 min, ~51,300 spread),
+consistent with V1 EIP-2929 behaviour on `totalRaised` zero→nonzero transition.
+
+#### 4.2 `finalize()` — Gas Consumption
+
+| Metric | Gas Units |
+|--------|----------:|
+| Gas used | 47,138 |
+
+**Observation:** Nearly identical to V1 (47,048). `finalize` only writes two booleans and emits
+one event — no token operations occur at this stage. The 90 gas difference is within measurement
+noise.
+
+#### 4.3 `withdrawMilestone()` — Per-Milestone Gas Consumption
+
+| Index | Allocation | Gas Units | Delta vs. V1 |
+|------:|----------:|----------:|-------------:|
+| 0 | 30 % | 76,250 | −17,138 |
+| 1 | 30 % | 59,200 | +225 |
+| 2 | 40 % | 50,681 | +222 |
+
+**Observation — milestone 0 significantly lower in V2 [fact]:**
+The 17,138 gas saving on milestone 0 is consistent with V2's withdrawal path using
+`IERC20(asset()).safeTransfer(creator, amount)` — a direct call on the payment token. In V1,
+the first withdrawal also writes to a previously-uninitialized creator ERC-20 balance slot
+(zero→nonzero, 20,000 gas). This penalty is unchanged in V2, yet milestone 0 is still lower.
+The additional saving reflects the absence of the separate `CampaignToken` contract's storage
+in V2 (no receipt token balance to update on withdrawal). Milestones 1 and 2 are near-identical
+to V1 (warm storage paths in both variants).
+
+---
+
+### M-V2-2 · Sepolia Testnet — Gas Benchmark
+
+> **Status: pending.** Same methodology as M-V1-2 applied to `CrowdfundingCampaign4626`.
+
+---
+
+## V3 — EVM / ERC-1155 Tier-Based
+
+### M-V3-1 · Local Hardhat Network — Gas Benchmark
+
+**Date:** 2026-03-15
+**Environment:** Hardhat in-process EVM (local network, no external node)
+**Solidity version:** 0.8.24
+**EVM target:** cancun
+**Optimizer:** enabled, 200 runs
+**Script:** `contracts/evm/scripts/benchmark.ts` (V3 benchmark cycle)
+
+#### Scenario Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Payment token | MockERC20 ("Mock USDC", 6 decimals) |
+| Tier used | Bronze (tierId = 0), price = 10 USDC |
+| `softCap` | 100 USDC |
+| `hardCap` | 600 USDC (60 × 10 USDC; slack for 50 contributors) |
+| Milestone schedule | [30%, 30%, 40%] |
+| Contributors (`N`) | 50 (sequential, distinct EOAs) |
+
+#### 4.1 `contribute(tierId=0)` — Sequential Gas Consumption (N = 50)
+
+| Metric | Gas Units |
+|--------|----------:|
+| `G_avg` | 123,853 |
+| `G_min` | 123,169 |
+| `G_max` | 157,369 |
+| `G_total` | 6,192,650 |
+
+**Observation — V3 higher than V1/V2 [fact]:**
+ERC-1155 V3 contribute costs approximately 20,600 gas more on avg than V1 (123,853 vs 103,226,
++20.0%) and 26,000 more than V2 (vs 97,806, +26.6%). The overhead comes from:
+1. ERC-1155 `_mint` writes to a two-dimensional balance map `_balances[tierId][contributor]`
+   and emits a `TransferSingle` event — more storage operations than ERC-20 `_mint`.
+2. An additional `tierContributions[contributor][tierId]` write (zero→nonzero on first call,
+   incurring cold SSTORE penalty per unique contributor × tier pair).
+3. The cross-contract call overhead to `CampaignTierToken.mint(...)`, similar to V1's
+   `CampaignToken.mint(...)`.
+
+The narrow spread between min and max (123,169 → 157,369, ~34,200) is consistent with the
+EIP-2929 cold-to-warm pattern on `totalRaised` for the first contribution.
+
+#### 4.2 `finalize()` — Gas Consumption
+
+| Metric | Gas Units |
+|--------|----------:|
+| Gas used | 47,092 |
+
+**Observation:** Essentially identical to V1 (47,048) and V2 (47,138). Finalization is
+token-standard-agnostic.
+
+#### 4.3 `withdrawMilestone()` — Per-Milestone Gas Consumption
+
+| Index | Allocation | Gas Units | Delta vs. V1 | Delta vs. V2 |
+|------:|----------:|----------:|-------------:|-------------:|
+| 0 | 30 % | 76,221 | −17,167 | −29 |
+| 1 | 30 % | 59,171 | −67 | −29 |
+| 2 | 40 % | 50,653 | −67 | −28 |
+
+**Observation — V3 milestone gas nearly identical to V2 [fact]:**
+Both V2 and V3 use `paymentToken.safeTransfer(creator, amount)` directly (not through a
+separate receipt token contract). The near-identical figures (76,221 vs 76,250 for milestone 0)
+confirm that the withdrawal path is structurally the same. The large saving vs V1 milestone 0
+(−17,167 gas) has the same root cause as V2: absence of a zero→nonzero payment-token balance
+write to the `receiptToken` contract.
+
+---
+
+### M-V3-2 · Sepolia Testnet — Gas Benchmark
+
+> **Status: pending.** Same methodology as M-V1-2 applied to `CrowdfundingCampaign1155`.
+
+---
+
 ### M-V1-2 · Sepolia Testnet — Gas Benchmark
 
 > **Status: pending.**
@@ -218,9 +368,17 @@ substantially higher throughput but is out of scope for this controlled comparis
 
 ## V5 — Solana / Token-2022
 
-> **Status: pending.** V5 is a separate Anchor program using the Token-2022 program instead of
-> classic SPL Token. Benchmarks will follow the same methodology as V4 (50 sequential contributions,
-> fee/latency/throughput) to enable direct comparison between SPL Token and Token-2022 on Solana.
+**Program:** `programs/crowdfunding_token2022` — implemented and 9/9 tests passing (2026-03-15).
+Uses `anchor_spl::token_2022` CPI calls and `TOKEN_2022_PROGRAM_ID` (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`).
+Benchmark script: `contracts/solana/scripts/benchmark_token2022.ts`.
+
+### M-V5-1 · Localnet (solana-test-validator) — Fee & Latency Benchmark
+
+> **Status: pending.** Same methodology as M-V4-1 (50 sequential contributions, fee/latency/throughput).
+> Run `npm run benchmark_token2022` with a running `solana-test-validator` to populate this section.
+> Expected comparison: V5 fee model is identical to V4 (5,000 lamports per signature, flat fee).
+> Key question: does Token-2022's additional on-chain account data or CPI overhead affect CU consumption
+> or latency vs. V4?
 
 ---
 

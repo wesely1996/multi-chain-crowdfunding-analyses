@@ -29,14 +29,13 @@ the controlled baseline, which are planned extensions, and what is intentionally
 
 | # | Variant | Platform | Token standard | Status | Justification |
 |---|---------|----------|---------------|--------|---------------|
-| 1 | ERC-20 receipt token per campaign | EVM | ERC-20 | **MVP** | Simplest EVM token standard; direct counterpart to SPL |
-| 2 | ERC-4626 vault shares | EVM | ERC-4626 | Planned | Yield mechanics require external DeFi protocol integration |
-| 3 | ERC-1155 tier rewards | EVM | ERC-1155 | Planned | Multi-token IDs add complexity orthogonal to core lifecycle |
-| 4 | SPL Token (classic) | Solana | SPL | **MVP** | Direct counterpart to ERC-20; classic SPL Token program |
-| 5 | Token-2022 (SPL extensions) | Solana | Token-2022 | Planned | Separate program for side-by-side comparison with V4 |
+| 1 | ERC-20 receipt token per campaign | EVM | ERC-20 | **Implemented** | Simplest EVM token standard; direct counterpart to SPL |
+| 2 | ERC-4626 vault shares | EVM | ERC-4626 | **Implemented** | Campaign IS the vault token; no separate receipt token deployed |
+| 3 | ERC-1155 tier rewards | EVM | ERC-1155 | **Implemented** | Tier-based (Bronze/Silver/Gold); per-tier refund with ERC-1155 burn |
+| 4 | SPL Token (classic) | Solana | SPL | **Implemented** | Direct counterpart to ERC-20; classic SPL Token program |
+| 5 | Token-2022 (SPL extensions) | Solana | Token-2022 | **Implemented** | Separate Anchor program (`crowdfunding_token2022`); 9/9 tests passing |
 
-`[fact]` Variants 1 and 4 (SPL) are the MVP implementations. Variants 2, 3, and 5 (Token-2022)
-are planned for later thesis milestones and are fully excluded from MVP benchmarks.
+`[fact]` All five variants are implemented. Variant 5 (Token-2022) benchmark run is pending.
 
 ---
 
@@ -106,8 +105,8 @@ decision, not an oversight.
 
 | Feature | Reason excluded | Future work reference |
 |---------|----------------|----------------------|
-| ERC-4626 vault yield accumulation | Requires external yield protocol integration; would make EVM contract depend on third-party state, breaking controlled comparison | Thesis variant 2; see §8 |
-| ERC-1155 tier-based rewards | Multi-token IDs (one per tier) add account/state complexity orthogonal to crowdfunding lifecycle | Thesis variant 3; see §8 |
+| ERC-4626 external yield accumulation | The ERC-4626 variant IS implemented (V2) but without integration to an external yield vault. On-chain yield (Aave/Compound integration) would make the EVM contract depend on third-party state, breaking controlled comparison | Implemented as standalone vault without yield source |
+| ERC-1155 arbitrary multi-token combinations | V3 ERC-1155 is implemented with three fixed tiers. Open-ended multi-token schemas (arbitrary IDs, hybrid NFT+ERC-20) are excluded as they cannot be cleanly benchmarked | Implemented (3-tier Bronze/Silver/Gold) |
 | Token-2022 extensions (transfer hooks, interest-bearing, confidential transfers) | Variable-size extension accounts and additional CPIs confound cost measurements | Thesis variant 5; see §8 |
 | Upgradeability / proxy patterns (EVM: EIP-1967 transparent proxy; Solana: BPF upgradeable loader) | Proxy indirection adds deploy/call overhead not present in Solana's native program model; breaks cost symmetry | Not planned — thesis focuses on immutable contracts |
 | On-chain governance (voting, timelock) | Out of scope for crowdfunding lifecycle; would require separate governance token | Not planned |
@@ -145,7 +144,7 @@ Any deviation from these versions must be documented in `docs/measurements.md`.
 | TypeScript | 5.4.x | EVM client, Solana tests |
 | Hardhat | 2.22.x | EVM compilation, testing, local node |
 | `@openzeppelin/contracts` | 5.1.x | ERC-20 base implementation |
-| Solidity | 0.8.20 | EVM contract compiler |
+| Solidity | 0.8.24 | EVM contract compiler (Cancun EVM target; required for OZ ERC4626 `mcopy`) |
 | Rust | stable (1.84+) | Solana program compilation |
 | Solana CLI | 3.0.15 (stable) | Program deployment, account inspection |
 | Anchor CLI | 0.32.1 | Build, test, deploy orchestration |
@@ -175,27 +174,42 @@ fee market dynamics. The thesis analysis must acknowledge this limitation.
 
 ## 8. Out of Scope / Future Work
 
-### 8.1 ERC-4626 — Vault Shares with On-Chain Yield (Thesis Variant 2)
+### 8.1 ERC-4626 — Vault Shares (Thesis Variant 2) `[Implemented]`
 
-The ERC-4626 vault standard wraps an underlying ERC-20 asset and accrues yield through an
-external protocol. In the crowdfunding context, contributions are deposited into a yield vault
-during the funding period; contributors receive vault shares rather than plain receipt tokens.
-If the campaign fails, shares are redeemed for the original principal (plus any yield). If it
-succeeds, yield flows to the creator.
+`CrowdfundingCampaign4626.sol` + `CrowdfundingFactory4626.sol` are fully implemented and tested
+(26 tests). The campaign contract extends OZ `ERC4626`: the campaign itself IS the vault share
+token — no separate `CampaignToken` is deployed. Standard ERC-4626 entry points (`deposit`,
+`mint`, `withdraw`, `redeem`) are disabled with custom errors (`UseContributeInstead` /
+`UseRefundInstead`) to preserve the crowdfunding state machine invariants.
 
-The architecture is extensible to this variant: the ERC-20 `receiptToken` field in the singleton
-contract can be replaced by an ERC-4626 `vault` reference. The lifecycle state machine is
-identical; only the `contribute` and `refund` functions change.
+Key design decisions:
+- `contribute(amount)` calls `_mint(msg.sender, amount)` directly (not `_deposit`) to avoid
+  double event emission and to decouple from ERC-4626's yield-ratio preview math.
+- `refund()` calls `_burn(msg.sender, amount)` directly, symmetric with `contribute`.
+- `maxDeposit / maxMint / maxWithdraw / maxRedeem` all return 0 to signal to ERC-4626-aware
+  integrators that standard vault flows are not supported.
+- The underlying asset (`asset()`) is the payment token (e.g. USDC); shares are minted 1:1.
 
-### 8.2 ERC-1155 — Tier-Based Campaigns (Thesis Variant 3)
+**Out of scope for V2:** external yield protocol integration (Aave, Compound). The V2 contract
+holds the payment token directly without routing it to a yield vault. If yield mechanics were
+added, the contract would depend on third-party state, breaking the controlled benchmark
+comparison. Yield integration is not planned for the thesis scope.
 
-ERC-1155 supports multiple token IDs in a single contract, making it natural for tiered
-crowdfunding (e.g. token ID 1 = bronze tier at 0.1 ETH, token ID 2 = silver tier at 0.5 ETH).
-Each tier has its own supply cap and reward metadata.
+### 8.2 ERC-1155 — Tier-Based Campaigns (Thesis Variant 3) `[Implemented]`
 
-The architecture is extensible: the `milestonePercentages` array becomes per-tier, and the
-`contributions` mapping becomes `contributions[address][tierId]`. The state machine transitions
-are identical.
+`CrowdfundingCampaign1155.sol` + `CrowdfundingFactory1155.sol` + `CampaignTierToken.sol` are
+fully implemented and tested (27 tests). Three fixed tiers (Bronze 100 USDC, Silver 500 USDC,
+Gold 1,000 USDC) are defined at campaign creation. Contributors select a tier via
+`contribute(tierId)` and receive one ERC-1155 token of that ID. Refunds are per-tier via
+`refund(tierId)`, which burns one tier token and returns the tier price in payment token.
+
+Key design decisions:
+- `tierContributions[address][tierId]` tracks count of tokens held per tier; `contributions[address]`
+  tracks total USDC for softCap/hardCap accounting (consistent with V1/V2).
+- The `CampaignTierToken` (ERC-1155) is deployed by the campaign constructor with an
+  `onlyCampaign` modifier on `mint` / `burn`, mirroring the `CampaignToken` (ERC-20) pattern.
+- `CrowdfundingFactory1155.createCampaign` emits `CampaignCreated1155` with both the campaign
+  and the tier token address (four fields total).
 
 ### 8.3 Token-2022 — SPL Extensions (Thesis Variant 5)
 
