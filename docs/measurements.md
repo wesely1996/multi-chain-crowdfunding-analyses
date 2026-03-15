@@ -224,36 +224,126 @@ substantially higher throughput but is out of scope for this controlled comparis
 
 ---
 
-## Cross-Chain Comparison Table
+## Cross-Chain Summary Tables
 
-> **Localnet baseline** — USD costs require testnet runs with known gas/SOL prices at time of
-> measurement. Fiat columns will be populated in M-V1-2 (Sepolia) and M-V4-2 (devnet).
-> EVM latency was not recorded in M-V1-1 (gas-only run); devnet latency for V4 is pending.
+> **Localnet baseline.** USD fiat costs require testnet runs (Sepolia / devnet) with a known
+> gas price or SOL price at time of measurement. All fiat cells are `—` (pending) until
+> M-V1-2 and M-V4-2 are completed. No fiat values have been invented or estimated.
+>
+> **EVM latency annotation.** Hardhat automines every transaction synchronously; there is no
+> mempool wait or block propagation. EVM latency values below reflect local RPC roundtrip
+> only (< 30 ms) and are **not comparable** to Solana localnet slot-confirmation latency
+> (~400 ms). Every EVM latency figure carries a `[automine]` tag to make this explicit.
+>
+> **Solana Compute Units.** CU consumption was not captured in M-V4-1. All CU cells show
+> `≤ 200,000 [ceiling]` — the Anchor default limit per instruction — until measured via
+> `getTransaction.meta.computeUnitsConsumed` in a follow-up run.
 
-### Raw-unit comparison (localnet)
+---
 
-| Metric | V1 EVM / Hardhat localnet | V4 Solana / localnet |
-|--------|--------------------------|---------------------|
-| `contribute()` avg cost | 103,257 gas | 10,000 lamports (0.00001 SOL) |
-| `contribute()` cost spread (min→max) | 102,231 → 153,531 gas | 10,000 → 10,000 lamports (flat) |
-| `finalize()` cost | 47,050 gas | 5,000 lamports (0.000005 SOL) |
-| `withdrawMilestone()` — index 0 | 93,125 gas | 10,000 lamports |
-| `withdrawMilestone()` — index 1 | 58,975 gas | 10,000 lamports |
-| `withdrawMilestone()` — index 2 | 50,459 gas | 10,000 lamports |
-| `contribute()` avg latency (ms) | — (not recorded) | 409 |
-| Throughput — 50 contributions total (ms) | — (not recorded) | 20,738 |
-| Throughput (TPS) | — (not recorded) | 2.41 |
+### Table 1 — Per-Operation Cost (localnet, raw units)
 
-### Fiat-cost comparison (testnet) — pending
+> Source: M-V1-1 (EVM gas) and M-V4-1 (Solana fees). EVM `refund()` gas measured
+> 2026-03-15 (fail-path run, N = 5). Solana `initialize_campaign` and `refund` fees
+> are derived from the fee model (5,000 lam × signers) — not directly recorded in M-V4-1.
 
-| Metric | V1 EVM / Sepolia | V4 Solana / devnet |
-|--------|-----------------|-------------------|
-| `contribute()` avg cost (USD) | — | — |
-| `finalize()` cost (USD) | — | — |
-| `withdrawMilestone()` avg cost (USD) | — | — |
-| Finality time (s) | — | — |
-| Throughput — 50 contributions total time (s) | — | — |
-| Throughput (TPS) | — | — |
+| Operation | EVM gas units | EVM fiat (pending) | Solana fee (lam / SOL) | Solana CU consumed | Solana fiat (pending) |
+|-----------|:-------------:|--------------------|:---------------------:|:-----------------:|----------------------|
+| `initialize_campaign` | — [¹] | — | 10,000 / 0.000010 [²] | ≤ 200,000 [ceiling] | — |
+| `contribute` — avg | 103,257 | — | 10,000 / 0.000010 | ≤ 200,000 [ceiling] | — |
+| `contribute` — min | 102,231 | — | 10,000 / 0.000010 | ≤ 200,000 [ceiling] | — |
+| `contribute` — max | 153,531 | — | 10,000 / 0.000010 | ≤ 200,000 [ceiling] | — |
+| `finalize` | 47,050 | — | 5,000 / 0.000005 | ≤ 200,000 [ceiling] | — |
+| `withdrawMilestone[0]` (30 %) | 93,125 | — | 10,000 / 0.000010 | ≤ 200,000 [ceiling] | — |
+| `withdrawMilestone[1]` (30 %) | 58,975 | — | 10,000 / 0.000010 | ≤ 200,000 [ceiling] | — |
+| `withdrawMilestone[2]` (40 %) | 50,459 | — | 10,000 / 0.000010 | ≤ 200,000 [ceiling] | — |
+| `refund` — avg | 72,766 | — | 10,000 / 0.000010 [²] | ≤ 200,000 [ceiling] | — |
+| `refund` — min | 68,906 | — | — | — | — |
+| `refund` — max | 73,732 | — | — | — | — |
+
+**Footnotes:**
+
+[¹] EVM `initialize_campaign` gas not recorded in M-V1-1; the campaign is deployed via
+`CrowdfundingFactory.createCampaign()` and its internal deployment gas was not separated
+from the factory call. To be added in M-V1-2.
+
+[²] Solana fee is deterministic: 5,000 lamports per signature. `initialize_campaign` and
+`refund` each require two signers (creator/contributor + fee-payer wallet) → 10,000 lamports.
+`finalize` uses one signer → 5,000 lamports. Derived from fee model; not directly measured
+for `initialize_campaign` and `refund` in M-V4-1. [assumption]
+
+**EVM refund() pattern (N = 5, fail path, 2026-03-15):**
+Contributors 0–3: 73,732 gas each. Contributor 4 (last): 68,906 gas.
+The 4,826 gas reduction on the final refund is consistent with one storage slot clearing:
+`totalRaised` transitions from 10,000,000 (the last remaining contribution) to zero, and
+the EIP-3529 SSTORE clear refund (capped at 20 % of `gasUsed`) reduces the net cost.
+
+---
+
+### Table 2 — Per-Operation Latency (localnet)
+
+> EVM latency source: `benchmark_extended.ts` run on 2026-03-15 against Hardhat in-process
+> EVM (`--network hardhat`). Solana latency source: M-V4-1 (2026-03-07, `solana-test-validator`).
+> **EVM `[automine]` values are not meaningful for network-level comparison.**
+
+| Operation | EVM localnet (ms) `[automine]` | Solana localnet avg (ms) | Solana min (ms) | Solana max (ms) |
+|-----------|:------------------------------:|:------------------------:|:---------------:|:---------------:|
+| `contribute` avg | 6 `[automine]` | 409 | 315 | 497 |
+| `contribute` min | 3 `[automine]` | — | — | — |
+| `contribute` max | 16 `[automine]` | — | — | — |
+| `finalize` | 2 `[automine]` | 306 | 306 | 306 |
+| `withdrawMilestone[0]` | 2 `[automine]` | 479 | 479 | 479 |
+| `withdrawMilestone[1]` | 3 `[automine]` | 340 | 340 | 340 |
+| `withdrawMilestone[2]` | 3 `[automine]` | 451 | 451 | 451 |
+
+**Interpretation:** Hardhat automine eliminates block-time wait entirely; the 2–16 ms range
+reflects JSON-RPC serialisation overhead only. Solana localnet latency (306–497 ms) is
+dominated by slot-confirmation time (~400 ms/slot). A meaningful latency comparison
+requires testnet data (Sepolia vs. devnet), deferred to M-V1-2 and M-V4-2.
+
+---
+
+### Table 3 — Throughput (localnet, N = 50 sequential contributions)
+
+> EVM source: `benchmark_extended.ts` timed window (2026-03-15). Solana source: M-V4-1
+> (2026-03-07). Both benchmarks pre-create accounts / approvals outside the timed window
+> and submit contributions sequentially, waiting for confirmation before each next call.
+
+| Metric | V1 EVM / Hardhat `[automine]` | V4 Solana / localnet |
+|--------|:-----------------------------:|:--------------------:|
+| N contributions | 50 | 50 |
+| Total wall-clock time (ms) | 291 | 20,738 |
+| Throughput (TPS) | 171.82 | 2.41 |
+| Limiting factor | Local RPC roundtrip; no real block time | ~400 ms/slot confirmation time |
+
+**Interpretation:** The 71× TPS gap (171.82 vs 2.41) is an artefact of Hardhat automine and
+does **not** represent real-world throughput. On Sepolia (12-second block time, one tx
+per block) the same sequential benchmark yields ~0.08 TPS. Solana's 2.41 TPS is bounded
+by localnet slot time; a parallel-submission strategy would yield significantly higher
+figures. Both numbers are reported for methodological reproducibility, not for direct
+platform comparison.
+
+---
+
+### Table 4 — Developer Experience
+
+> LOC counts measured on 2026-03-15 with `wc -l`. EVM contract LOC excludes `MockERC20.sol`
+> (test fixture, 19 lines). Solana contract LOC includes all `.rs` source files under
+> `programs/crowdfunding/src/`. Client LOC counts are per-platform (EVM-side vs. Solana-side)
+> and exclude shared utilities (43 TS lines / ~266 C# lines) unless noted.
+> Setup step counts derived from `docs/setup.md`, assuming Linux environment.
+
+| Metric | V1 EVM | V4 Solana |
+|--------|--------|-----------|
+| **Contract LOC** (business logic) | 296 Solidity — 3 files (`CrowdfundingCampaign.sol` 202, `CrowdfundingFactory.sol` 52, `CampaignToken.sol` 42) | 588 Rust — 8 files (instructions: 453; state: 36; errors: 33; lib: 44; mod: 11 [no-op router]) |
+| **Test LOC** | 475 TypeScript — 3 files (`CrowdfundingCampaign.test.ts` 301, `CrowdfundingFactory.test.ts` 76, `fixtures.ts` 98) | 642 TypeScript — 1 file (`crowdfunding.ts`) |
+| **TypeScript client LOC** | 521 — 6 files (EVM-side operations) | 597 — 8 files (Solana-side operations, incl. `pda.ts` 35) |
+| **C# client LOC** | 350 — `EvmCampaignService.cs` | 551 — `SolanaCampaignService.cs` 300 + `InstructionBuilder.cs` 145 + `TransactionHelper.cs` 56 + `PdaHelper.cs` 50 |
+| **Framework / toolchain** | Solidity 0.8.20 + Hardhat 2.28 + OpenZeppelin 5.1 + viem 2.21 | Rust 1.84 + Anchor 0.32 + SPL Token 0.3.11 + @solana/web3.js 1.95 |
+| **Setup steps to first tx** | **3** — `npm install` → `npx hardhat compile` → `npx hardhat run scripts/deploy.ts` | **10** — prereqs → Rust → Solana CLI → AVM → Anchor → Node.js (nvm) → keypair → `npm install` → `anchor build` → `solana-test-validator` + `anchor deploy` |
+| **Type safety model** | ABI-driven: Solidity enforces types on-chain; viem generates TypeScript types from ABI; Nethereum uses ABI-generated C# classes | IDL-driven: Anchor generates `idl.json`; `@coral-xyz/anchor` provides TS types; Solnet requires manual account struct mapping in C# |
+| **Boilerplate burden** | Low — contract is self-contained; clients require ABI + address only; ERC-20 allowance is the only extra step | High — every instruction requires an explicit account list (≥ 8 accounts for `contribute`); PDA derivation must be reproduced in every client; ATA pre-creation required before first contribute |
+| **Key pain points** | Cold/warm SSTORE spread on first contribute (+51 k gas); ERC-20 approve-then-contribute two-step per contributor | Account enumeration per instruction; ATA pre-creation overhead; receipt-mint PDA seed must be consistent across program, TS, and C# clients |
 
 ---
 
