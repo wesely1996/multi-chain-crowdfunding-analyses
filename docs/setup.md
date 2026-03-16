@@ -1,5 +1,147 @@
 # Environment Setup
 
+## Quick Start
+
+Complete walk-through from a clean machine to viewing benchmark results in the dashboard. Follow sections in order; skip sections for platforms you have already set up.
+
+### Prerequisites
+
+| Tool | Minimum version | Used for |
+|------|----------------|---------|
+| Node.js | 20.x LTS | EVM contracts, TypeScript clients, dashboard |
+| Python | 3.11+ | Benchmark harness |
+| Rust | 1.84+ | Solana program compilation |
+| Solana CLI | 3.x stable | Program deployment |
+| Anchor CLI | 0.32.1 | Solana build, test, deploy |
+| .NET SDK | 8.0 | .NET client (optional) |
+
+### Step 1 — EVM contracts
+
+```bash
+cd contracts/evm
+npm install
+npx hardhat compile             # compile V1/V2/V3 (expect: 12 files, cancun target)
+npx hardhat test                # 77 tests — no external node needed
+```
+
+Start a local node (keep open in a separate terminal):
+
+```bash
+npx hardhat node
+```
+
+Deploy all three variants:
+
+```bash
+npx hardhat run scripts/deploy.ts --network localhost
+# Note the printed MockERC20, Factory, and Campaign addresses for .env files
+```
+
+### Step 2 — Solana programs
+
+> On Windows, run all Solana commands inside WSL 2. See the [Solana](#solana) section for full WSL setup.
+
+```bash
+cd contracts/solana
+npm install
+anchor build        # compiles both crowdfunding (V4) and crowdfunding_token2022 (V5)
+anchor test         # 9 passing (~15 s)
+```
+
+Start a persistent validator (keep open in a separate terminal):
+
+```bash
+solana-test-validator --reset
+```
+
+Deploy:
+
+```bash
+cd contracts/solana && anchor deploy
+```
+
+### Step 3 — Python benchmark harness
+
+```bash
+cd benchmarks
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# EVM lifecycle (Hardhat node must be running)
+VARIANT=V1 CLIENT=python python run_tests.py --platform evm
+VARIANT=V2 CLIENT=python python run_tests.py --platform evm
+VARIANT=V3 CLIENT=python python run_tests.py --platform evm
+
+# EVM throughput
+VARIANT=V1 CLIENT=python python throughput_test.py --platform evm
+
+# Solana lifecycle (solana-test-validator + anchor deploy must be running)
+VARIANT=V4 CLIENT=python python run_tests.py --platform solana
+VARIANT=V5 CLIENT=python python run_tests.py --platform solana
+
+# Aggregate and compare
+python collect_metrics.py
+```
+
+### Step 4 — TypeScript client
+
+```bash
+cd clients/ts
+npm install
+cp .env.localnet .env
+# Edit .env — paste addresses from Step 1 deploy output and Anchor.toml program IDs
+
+# EVM lifecycle
+npm run create-campaign
+npm run contribute -- --amount 10000000
+npm run finalize && npm run withdraw
+npm run status
+
+# Solana lifecycle
+npm run sol:create-campaign -- --deadline-seconds 60
+npm run sol:contribute -- --amount 10000000
+# wait ~60 s
+npm run sol:finalize && npm run sol:withdraw
+npm run sol:status
+```
+
+### Step 5 — Dashboard
+
+```bash
+cd dashboard
+npm install
+npm run dev        # open http://localhost:3000
+```
+
+Result files from Step 3 appear automatically after a browser refresh. Use the **Run** panel to trigger live benchmarks from the UI.
+
+### Testnet runs (canonical thesis data)
+
+```bash
+# EVM — Sepolia
+EVM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY \
+BENCHMARK_ENV=sepolia \
+VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
+
+# Solana — devnet
+SOLANA_RPC_URL=https://api.devnet.solana.com \
+BENCHMARK_ENV=solana-devnet \
+VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `Compiled 0 files` | Run from `contracts/evm/` where `hardhat.config.ts` lives |
+| `cannot connect to http://127.0.0.1:8545` | Start Hardhat node: `cd contracts/evm && npx hardhat node` |
+| Port 8899 already in use | `pkill -f solana-test-validator` |
+| `anchor: command not found` | Run `avm use 0.32.1` and check your PATH |
+| Dashboard shows no results | Result files must have `"schema_version": "2"`; start `npm run dev` from `dashboard/` |
+| V5 IDL not found | Run `anchor build` in `contracts/solana/` first |
+
+---
+
 ## EVM
 
 All EVM work runs on Node.js (Linux, macOS, or Windows).
@@ -215,11 +357,18 @@ solana-keygen new --no-bip39-passphrase
 
 ### Build and test
 
+The Solana workspace contains two Anchor programs:
+
+| Program | Variant | Program ID |
+|---------|---------|-----------|
+| `crowdfunding` | V4 — SPL Token (classic) | `BiVZkwVjTU1vBKa7TRQFU6w97NGBSK5xvuNdAaDtPHWU` |
+| `crowdfunding_token2022` | V5 — Token-2022 extensions | `46xPA3ukhGDwk1w9ZZGCmkmVWuRR1nT9Z3QsPrDNxRyy` |
+
 ```bash
 cd contracts/solana
 npm install
-anchor build          # compiles the Rust program to SBF bytecode
-anchor test           # spins up localnet validator + runs TS tests
+anchor build          # compiles both programs to SBF bytecode
+anchor test           # spins up localnet validator + runs TS tests for both programs
 ```
 
 Expected output for a clean run:
@@ -244,6 +393,11 @@ crowdfunding
 >
 > Tests 3, 5, and 6 each initialize a campaign with a 2-second deadline and call
 > `await sleep(3000)` to let it expire before finalizing. The total suite takes ~15 seconds.
+
+> **V5 (Token-2022) program:** `crowdfunding_token2022` exposes identical instructions and PDA
+> seeds to V4. The only internal difference is the use of `anchor_spl::token_2022` CPI calls
+> and the `Token2022` program constant. Both programs are built and tested by `anchor build` /
+> `anchor test` in a single command.
 
 ### Benchmark (N=50 sequential contributions)
 
@@ -721,7 +875,12 @@ python benchmarks/run_tests.py --platform evm
 
 # Tag with variant and client for the multi-variant matrix
 VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
+VARIANT=V2 CLIENT=python python benchmarks/run_tests.py --platform evm
+VARIANT=V3 CLIENT=python python benchmarks/run_tests.py --platform evm
+
+# Solana variants (start solana-test-validator + anchor deploy first)
 VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
+VARIANT=V5 CLIENT=python python benchmarks/run_tests.py --platform solana
 
 # Sepolia (set EVM_RPC_URL before running)
 EVM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY \

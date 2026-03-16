@@ -35,7 +35,7 @@ the controlled baseline, which are planned extensions, and what is intentionally
 | 4 | SPL Token (classic) | Solana | SPL | **Implemented** | Direct counterpart to ERC-20; classic SPL Token program |
 | 5 | Token-2022 (SPL extensions) | Solana | Token-2022 | **Implemented** | Separate Anchor program (`crowdfunding_token2022`); 9/9 tests passing |
 
-`[fact]` All five variants are implemented. Variant 5 (Token-2022) benchmark run is pending.
+`[fact]` All five variants are implemented. Localnet benchmark runs for all five variants are complete (see `benchmarks/results/`). Testnet runs (Sepolia, Solana devnet) are pending.
 
 ---
 

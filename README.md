@@ -23,20 +23,21 @@ Init → Funding (softCap, hardCap, deadline) → Finalize → Success (withdraw
 
 | # | Variant | Standard | Status |
 |---|---------|----------|--------|
-| 1 | EVM – Receipt tokens per campaign | ERC-20 | MVP |
-| 2 | EVM – Vault shares with on-chain yield | ERC-4626 | Planned |
-| 3 | EVM – Tier-based campaigns | ERC-1155 | Planned |
-| 4 | Solana – SPL Token (classic) | SPL | MVP |
-| 5 | Solana – Token-2022 (SPL extensions) | Token-2022 | Planned |
+| 1 | EVM – Receipt tokens per campaign | ERC-20 | Implemented |
+| 2 | EVM – Vault shares with on-chain yield | ERC-4626 | Implemented |
+| 3 | EVM – Tier-based campaigns | ERC-1155 | Implemented |
+| 4 | Solana – SPL Token (classic) | SPL | Implemented |
+| 5 | Solana – Token-2022 (SPL extensions) | Token-2022 | Implemented |
 
 ## Repository Structure
 
 ```
-contracts/evm/        – Solidity contracts + Hardhat/Foundry tests and deploy scripts
-contracts/solana/     – Anchor program (programs/crowdfunding/) + tests
-clients/ts/           – TypeScript + viem client helpers (EVM and Solana)
-clients/dotnet/       – C# + Nethereum client
-benchmarks/           – Python + web3.py benchmark harness; results in results/
+contracts/evm/        – Solidity contracts (V1/V2/V3) + Hardhat tests and deploy scripts
+contracts/solana/     – Anchor programs (V4 crowdfunding, V5 crowdfunding_token2022) + tests
+clients/ts/           – TypeScript + viem / Anchor TS lifecycle scripts (EVM and Solana)
+clients/dotnet/       – C# + Nethereum / Solnet client
+benchmarks/           – Python + web3.py benchmark harness; results in benchmarks/results/
+dashboard/            – Next.js 14 web app for visualising and triggering benchmark runs
 docs/                 – Architecture, measurements, security, and scope documentation
 ```
 
@@ -45,9 +46,9 @@ docs/                 – Architecture, measurements, security, and scope docume
 | Client | Stack | Purpose |
 |--------|-------|---------|
 | `clients/ts/` | TypeScript + viem / Anchor TS | EVM and Solana lifecycle scripts |
-| `clients/dotnet/` | C# + Nethereum | .NET integration layer |
-| `benchmarks/` | Python + web3.py | Automated benchmarking and metric collection |
-| `contracts/solana/` | TypeScript + Anchor | Solana program deployment and testing |
+| `clients/dotnet/` | C# + Nethereum / Solnet | .NET integration layer |
+| `benchmarks/` | Python + web3.py / anchorpy | Automated benchmarking and metric collection |
+| `dashboard/` | Next.js 14 + Recharts | Benchmark visualisation and live run triggering |
 
 ## Metrics
 
@@ -64,30 +65,60 @@ docs/                 – Architecture, measurements, security, and scope docume
 
 ## Quick Start
 
-### EVM
+### EVM (all three variants)
 
 ```bash
 cd contracts/evm
-npx hardhat compile        # or: forge build
-npx hardhat test           # or: forge test
-ts-node scripts/deploy.ts
+npm install
+npx hardhat compile                                    # compile V1, V2, V3 contracts
+npx hardhat test                                       # run all 77 tests
+npx hardhat run scripts/deploy.ts                      # deploy all variants locally
 ```
 
-### Solana
+### Solana (V4 SPL + V5 Token-2022)
 
 ```bash
 cd contracts/solana
+npm install
 anchor build
 anchor test
 ```
 
-### Benchmarks
+### Python Benchmarks
 
 ```bash
-python benchmarks/run_tests.py
-python benchmarks/throughput_test.py
-python benchmarks/collect_metrics.py
+cd benchmarks
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Start Hardhat node in a separate terminal: cd contracts/evm && npx hardhat node
+VARIANT=V1 python run_tests.py --platform evm
+VARIANT=V2 python run_tests.py --platform evm
+VARIANT=V3 python run_tests.py --platform evm
+
+# Start solana-test-validator + anchor deploy first
+VARIANT=V4 python run_tests.py --platform solana
+VARIANT=V5 python run_tests.py --platform solana
+
+python collect_metrics.py      # print cross-variant comparison table
 ```
+
+### Dashboard
+
+```bash
+cd dashboard
+npm install
+npm run dev        # open http://localhost:3000
+```
+
+## Documentation
+
+| File | Contents |
+|------|---------|
+| `docs/setup.md` | Quick start guide + full environment setup, toolchain versions, benchmark scripts reference |
+| `docs/architecture.md` | Contract state machine, storage layouts, PDA design, decision log |
+| `docs/measurements.md` | Benchmark results ledger (M-V1-1, M-V4-1, …) |
+| `docs/scope.md` | Thesis scope, variant definitions, assumption tracking |
 
 ## References
 
