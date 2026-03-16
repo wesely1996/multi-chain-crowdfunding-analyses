@@ -125,7 +125,7 @@ SOLANA_WALLET_PATH: str = os.getenv(
 # Solana program ID — must match `declare_id!` in lib.rs and Anchor.toml
 SOLANA_PROGRAM_ID: str = os.getenv(
     "SOLANA_PROGRAM_ID",
-    "4agCFfWuoR6MPGXeAb6cXQTHcWmxvqD29uanxJd4bkXv",
+    "BiVZkwVjTU1vBKa7TRQFU6w97NGBSK5xvuNdAaDtPHWU",
 )
 
 # Variant → (py_idl_path, program_id)

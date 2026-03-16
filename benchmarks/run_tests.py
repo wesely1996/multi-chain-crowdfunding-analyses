@@ -415,10 +415,15 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         from anchorpy import Program, Provider, Wallet, Idl, Context
         from solana.rpc.async_api import AsyncClient
         from solana.rpc.commitment import Confirmed
+        from solana.rpc.types import TxOpts
         from solders.keypair import Keypair  # type: ignore
         from solders.pubkey import Pubkey    # type: ignore
         from spl.token.async_client import AsyncToken
         from spl.token.constants import TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+        from spl.token.instructions import (
+            create_associated_token_account,
+            get_associated_token_address,
+        )
         import asyncio
         import struct
     except ImportError as exc:
@@ -497,16 +502,23 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             pda, _ = Pubkey.find_program_address(seeds, program_id)
             return pda
 
+        # TxOpts for fire-and-forget sends; we confirm manually via _send_and_confirm
+        # to avoid the solana.py __post_send_with_confirm last_valid_block_height timeout
+        no_confirm_opts = TxOpts(skip_confirmation=True, skip_preflight=True)
+
+        async def _send_and_confirm(sig) -> None:
+            """Poll get_signature_statuses until confirmed; avoids last_valid_block_height issues."""
+            for _ in range(120):  # up to 60 s
+                resp = await client.get_signature_statuses([sig])
+                st = resp.value[0]
+                if st and st.confirmation_status is not None:
+                    return
+                await asyncio.sleep(0.5)
+            raise RuntimeError(f"Transaction not confirmed after 60 s: {sig}")
+
         # ── Phase 1: create payment mint (setup, not timed) ─────────────────
         print("[solana] Creating payment mint and funding contributors...")
-        from solana.rpc.types import TxOpts
-        from spl.token.instructions import (
-            create_associated_token_account,
-            get_associated_token_address,
-            initialize_mint,
-            mint_to,
-            MintToParams,
-        )
+        from spl.token.instructions import initialize_mint, mint_to, MintToParams
         from solders.system_program import create_account, CreateAccountParams
         from solders.sysvar import RENT
 
@@ -540,17 +552,21 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
 
         # Pre-create contributor payment ATAs and mint tokens
         # WHY: setup outside timed loop so it does not skew TPS measurement
+        # skip_confirmation=True for setup mints to avoid blockhash expiry under
+        # sequential load; a single sleep at the end lets all txs confirm before
+        # the timed benchmark phase begins.
         print("[solana] Pre-creating ATAs and minting tokens...")
-        skip_opts = TxOpts(skip_confirmation=False, skip_preflight=True)
+        fire_opts = TxOpts(skip_confirmation=True, skip_preflight=True)
         payment_ata_addrs: list[Pubkey] = []
         for i, c in enumerate(contributors):
             ata = await payment_mint.create_account(c.pubkey())
-            await payment_mint.mint_to(ata, payer, config.CONTRIB_AMOUNT, opts=skip_opts)
+            await payment_mint.mint_to(ata, payer, config.CONTRIB_AMOUNT, opts=fire_opts)
             payment_ata_addrs.append(ata)
             if (i + 1) % 10 == 0:
                 print(f"  ATAs: {i + 1} / {config.N_CONTRIBUTIONS}")
-                await asyncio.sleep(1)
-        await asyncio.sleep(1)
+                await asyncio.sleep(2)
+        # Wait for all setup mints to confirm before timed phase starts
+        await asyncio.sleep(5)
 
         # ── Phase 2: initialize_campaign (SUCCESS) ───────────────────────────
         print("[solana] initialize_campaign (success)...")
@@ -585,24 +601,35 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             config.HARD_CAP,
             deadline_ts,
             bytes(config.MILESTONES),
-            ctx=Context(accounts=init_accounts, signers=[creator_kp]),
+            ctx=Context(accounts=init_accounts, signers=[creator_kp], options=no_confirm_opts),
         )
-        await client.confirm_transaction(sig, commitment=Confirmed)
+        await _send_and_confirm(sig)
         print(f"[solana] Campaign (success): {campaign_pda}")
 
-        # Pre-create receipt ATAs for all contributors
+        # Pre-create receipt ATAs for all contributors using ATA program so the
+        # address matches what the program derives via associated_token_address().
         print("[solana] Pre-creating receipt ATAs...")
         receipt_ata_addrs: list[Pubkey] = []
-        receipt_spl = SPLAsyncToken(client, receipt_mint_pda, TOKEN_PROGRAM_ID, payer)
-        for c in contributors:
-            ata = await receipt_spl.create_account(c.pubkey())
-            receipt_ata_addrs.append(ata)
-        await asyncio.sleep(1)
+        ata_fire_opts = TxOpts(skip_confirmation=True, skip_preflight=True)
+        for i, c in enumerate(contributors):
+            ata_addr = get_associated_token_address(c.pubkey(), receipt_mint_pda)
+            ix = create_associated_token_account(payer.pubkey(), c.pubkey(), receipt_mint_pda)
+            from solders.transaction import Transaction as SoldersTransaction
+            from solders.message import Message
+            bh_resp = await client.get_latest_blockhash()
+            bh = bh_resp.value.blockhash
+            msg = Message.new_with_blockhash([ix], payer.pubkey(), bh)
+            tx = SoldersTransaction([payer], msg, bh)
+            await client.send_raw_transaction(bytes(tx), opts=ata_fire_opts)
+            receipt_ata_addrs.append(ata_addr)
+            if (i + 1) % 10 == 0:
+                await asyncio.sleep(2)
+        # Wait for receipt ATA txs to fully settle before the timed loop
+        await asyncio.sleep(10)
 
         # ── Phase 3: contribute × N (TIMED) ─────────────────────────────────
         print(f"[solana] Running {config.N_CONTRIBUTIONS} timed contribute() calls...")
         contribute_ops: list[dict] = []
-        from anchorpy import Context
         throughput_start = _ms_now()
 
         for i, c in enumerate(contributors):
@@ -621,13 +648,13 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
                 "system_program": SYSTEM_PROGRAM_ID,
                 "rent": RENT,
             }
-            sig, latency = await _timed_rpc(
-                program.rpc["contribute"](
-                    config.CONTRIB_AMOUNT,
-                    ctx=Context(accounts=contrib_accounts, signers=[c]),
-                )
+            t0 = _ms_now()
+            sig = await program.rpc["contribute"](
+                config.CONTRIB_AMOUNT,
+                ctx=Context(accounts=contrib_accounts, signers=[c], options=no_confirm_opts),
             )
-            await client.confirm_transaction(sig, commitment=Confirmed)
+            await _send_and_confirm(sig)
+            latency = _ms_now() - t0
             fee = await _get_fee(sig)
             contribute_ops.append({
                 "name": "contribute",
@@ -668,16 +695,17 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         sig = await program.rpc["initialize_campaign"](
             fc_id, config.SOFT_CAP, config.HARD_CAP, fc_deadline,
             bytes(config.MILESTONES),
-            ctx=Context(accounts=fc_init_accounts, signers=[creator_kp]),
+            ctx=Context(accounts=fc_init_accounts, signers=[creator_kp], options=no_confirm_opts),
         )
-        await client.confirm_transaction(sig, commitment=Confirmed)
+        await _send_and_confirm(sig)
 
         # One contribution so softCap is met
         fc_c = contributors[0]
         await payment_mint.mint_to(payment_ata_addrs[0], payer, config.CONTRIB_AMOUNT,
-                                   opts=TxOpts(skip_confirmation=False))
-        fc_receipt_spl = SPLAsyncToken(client, fc_receipt_pda, TOKEN_PROGRAM_ID, payer)
-        fc_receipt_ata = await fc_receipt_spl.create_account(fc_c.pubkey())
+                                   opts=TxOpts(skip_confirmation=True, skip_preflight=True))
+        await asyncio.sleep(3)
+        # Use proper ATA address (derived by ATA program) so the program constraint passes
+        fc_receipt_ata = get_associated_token_address(fc_c.pubkey(), fc_receipt_pda)
         fc_contrib_record = _find_pda([b"contributor", bytes(fc_pda), bytes(fc_c.pubkey())])
 
         fc_contrib_accounts = {
@@ -696,9 +724,9 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         }
         sig = await program.rpc["contribute"](
             config.CONTRIB_AMOUNT,
-            ctx=Context(accounts=fc_contrib_accounts, signers=[fc_c]),
+            ctx=Context(accounts=fc_contrib_accounts, signers=[fc_c], options=no_confirm_opts),
         )
-        await client.confirm_transaction(sig, commitment=Confirmed)
+        await _send_and_confirm(sig)
 
         # Wait for deadline
         await asyncio.sleep(6)
@@ -709,10 +737,12 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             "caller": payer.pubkey(),
             "campaign": fc_pda,
         }
-        sig, latency = await _timed_rpc(
-            program.rpc["finalize"](ctx=Context(accounts=finalize_accounts))
+        t0 = _ms_now()
+        sig = await program.rpc["finalize"](
+            ctx=Context(accounts=finalize_accounts, options=no_confirm_opts)
         )
-        await client.confirm_transaction(sig, commitment=Confirmed)
+        await _send_and_confirm(sig)
+        latency = _ms_now() - t0
         fin_fee = await _get_fee(sig)
         finalize_op = {
             "name": "finalize",
@@ -738,12 +768,12 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
                 "payment_mint": payment_mint_pubkey,
                 "token_program": TOKEN_PROGRAM_ID,
             }
-            sig, latency = await _timed_rpc(
-                program.rpc["withdraw_milestone"](
-                    ctx=Context(accounts=wd_accounts, signers=[creator_kp])
-                )
+            t0 = _ms_now()
+            sig = await program.rpc["withdraw_milestone"](
+                ctx=Context(accounts=wd_accounts, signers=[creator_kp], options=no_confirm_opts)
             )
-            await client.confirm_transaction(sig, commitment=Confirmed)
+            await _send_and_confirm(sig)
+            latency = _ms_now() - t0
             fee = await _get_fee(sig)
             withdraw_ops.append({
                 "name": f"withdraw_milestone_{m}",
@@ -781,18 +811,19 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         sig = await program.rpc["initialize_campaign"](
             ref_id, config.SOFT_CAP_REFUND, config.HARD_CAP, ref_deadline,
             bytes(config.MILESTONES),
-            ctx=Context(accounts=ref_init_accounts, signers=[creator_kp]),
+            ctx=Context(accounts=ref_init_accounts, signers=[creator_kp], options=no_confirm_opts),
         )
-        await client.confirm_transaction(sig, commitment=Confirmed)
+        await _send_and_confirm(sig)
 
-        ref_receipt_spl = SPLAsyncToken(client, ref_receipt_pda, TOKEN_PROGRAM_ID, payer)
         for c in contributors[:n_refund]:
             await payment_mint.mint_to(
                 get_associated_token_address(c.pubkey(), payment_mint_pubkey),
                 payer, config.CONTRIB_AMOUNT,
-                opts=TxOpts(skip_confirmation=False),
+                opts=TxOpts(skip_confirmation=True, skip_preflight=True),
             )
-            ref_receipt_ata = await ref_receipt_spl.create_account(c.pubkey())
+        await asyncio.sleep(5)  # let mints confirm before contributing
+        for c in contributors[:n_refund]:
+            ref_receipt_ata = get_associated_token_address(c.pubkey(), ref_receipt_pda)
             ref_contrib_record = _find_pda([b"contributor", bytes(ref_pda), bytes(c.pubkey())])
             ref_contrib_accounts = {
                 "contributor": c.pubkey(),
@@ -810,16 +841,16 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             }
             sig = await program.rpc["contribute"](
                 config.CONTRIB_AMOUNT,
-                ctx=Context(accounts=ref_contrib_accounts, signers=[c]),
+                ctx=Context(accounts=ref_contrib_accounts, signers=[c], options=no_confirm_opts),
             )
-            await client.confirm_transaction(sig, commitment=Confirmed)
+            await _send_and_confirm(sig)
 
         await asyncio.sleep(6)  # wait for ref_deadline
 
         sig = await program.rpc["finalize"](
-            ctx=Context(accounts={"caller": payer.pubkey(), "campaign": ref_pda})
+            ctx=Context(accounts={"caller": payer.pubkey(), "campaign": ref_pda}, options=no_confirm_opts)
         )
-        await client.confirm_transaction(sig, commitment=Confirmed)
+        await _send_and_confirm(sig)
 
         # ── refund × n_refund (TIMED) ──────────────────────────────────────────
         refund_ops: list[dict] = []
@@ -841,10 +872,12 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
                 "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
                 "system_program": SYSTEM_PROGRAM_ID,
             }
-            sig, latency = await _timed_rpc(
-                program.rpc["refund"](ctx=Context(accounts=refund_accounts, signers=[c]))
+            t0 = _ms_now()
+            sig = await program.rpc["refund"](
+                ctx=Context(accounts=refund_accounts, signers=[c], options=no_confirm_opts)
             )
-            await client.confirm_transaction(sig, commitment=Confirmed)
+            await _send_and_confirm(sig)
+            latency = _ms_now() - t0
             fee = await _get_fee(sig)
             refund_ops.append({
                 "name": "refund",
@@ -863,8 +896,8 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             "schema_version": SCHEMA_VERSION,
             "variant": variant,
             "variant_label": config.VARIANT_LABELS.get(variant, variant),
-            "client": client,
-            "client_label": config.CLIENT_LABELS.get(client, client),
+            "client": config.CLIENT,
+            "client_label": config.CLIENT_LABELS.get(config.CLIENT, config.CLIENT),
             "environment": env_label,
             "platform": "Solana",
             "chain_id": None,
@@ -882,7 +915,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             },
         }
 
-        out_path = config.results_path(variant, client, "lifecycle")
+        out_path = config.results_path(variant, config.CLIENT, "lifecycle")
         _write_json(out_path, result)
         # Also write legacy path for backward compat
         _write_json(config.SOLANA_RAW_RESULTS, result)
