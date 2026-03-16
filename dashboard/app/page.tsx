@@ -1,101 +1,296 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useCallback, useEffect, useState } from "react";
+import { BenchmarkFile } from "@/lib/types";
+import { formatGas, formatMs, formatTps } from "@/lib/format";
+import { MetricCard } from "@/components/MetricCard";
+import FilterBar from "@/components/FilterBar";
+import OperationsTable from "@/components/OperationsTable";
+import CompareChart from "@/components/CompareChart";
+import RunPanel from "@/components/RunPanel";
+
+// Cost-to-performance ratio: average fee units per TPS.
+// The core thesis metric — how much does each unit of throughput cost on each chain?
+function deriveCostPerTps(result: BenchmarkFile): string {
+  const gasAvg = result.throughput.per_tx_gas?.avg ?? null;
+  const feeAvg = result.throughput.per_tx_fee?.avg ?? null;
+  const costUnit = gasAvg ?? feeAvg;
+  if (costUnit === null || result.throughput.tps === 0) return "—";
+  return (costUnit / result.throughput.tps).toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+  });
+}
+
+function formatTimestamp(utcSeconds: number): string {
+  return new Date(utcSeconds * 1000).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function EmptyState() {
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+    <div className="rounded-lg border border-gray-800 bg-gray-900 p-10 text-center">
+      <p className="text-gray-400 font-medium">No benchmark results found</p>
+      <p className="text-sm text-gray-600 mt-1">
+        Use the Run Benchmark panel to generate results, or verify that{" "}
+        <code className="text-gray-500">benchmarks/results/</code> contains valid JSON files.
+      </p>
+    </div>
+  );
+}
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+interface ResultCardProps {
+  result: BenchmarkFile;
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function ResultCard({ result, isSelected, onClick }: ResultCardProps) {
+  const platformBadge =
+    result.platform === "EVM"
+      ? "bg-blue-900/40 text-blue-400"
+      : "bg-purple-900/40 text-purple-400";
+
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left rounded-lg border p-4 transition-colors ${
+        isSelected
+          ? "border-blue-500 bg-gray-800"
+          : "border-gray-700 bg-gray-900 hover:border-gray-600"
+      }`}
+    >
+      <div className="flex justify-between items-start mb-3">
+        <span className="font-mono text-sm font-semibold text-white">
+          {result.variant} · {result.client}
+        </span>
+        <span className={`text-xs px-2 py-0.5 rounded font-mono ${platformBadge}`}>
+          {result.platform}
+        </span>
+      </div>
+
+      <p className="text-xs text-gray-500 mb-2">{result.environment}</p>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <div className="flex justify-between">
+          <span className="text-gray-500">TPS</span>
+          <span className="font-mono text-green-400">{formatTps(result.throughput.tps)}</span>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+        <div className="flex justify-between">
+          <span className="text-gray-500">Ops</span>
+          <span className="font-mono text-gray-300">{result.operations.length}</span>
+        </div>
+        <div className="flex justify-between col-span-2">
+          <span className="text-gray-500">Cost/TPS</span>
+          <span className="font-mono text-yellow-400">{deriveCostPerTps(result)}</span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+interface ResultDetailProps {
+  result: BenchmarkFile;
+}
+
+function ResultDetail({ result }: ResultDetailProps) {
+  const isEvm = result.platform === "EVM";
+
+  const avgFeeLabel = isEvm ? "Avg Gas/Tx" : "Avg Fee/Tx";
+  const avgFeeValue = isEvm
+    ? formatGas(result.throughput.per_tx_gas?.avg ?? null)
+    : result.throughput.per_tx_fee
+      ? result.throughput.per_tx_fee.avg.toLocaleString("en-US") + " lam"
+      : "—";
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h2 className="text-xs uppercase tracking-widest text-gray-500">
+          Detail — {result.variant} / {result.client} / {result.environment}
+        </h2>
+        <span className="text-xs text-gray-600">{formatTimestamp(result.timestamp_utc)}</span>
+      </div>
+
+      {/* Key metric cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <MetricCard
+          label="Throughput"
+          value={result.throughput.tps.toFixed(2)}
+          unit="TPS"
+          variant={result.variant}
+        />
+        <MetricCard
+          label="Total Time"
+          value={formatMs(result.throughput.total_time_ms)}
+          variant={result.variant}
+        />
+        <MetricCard
+          label="Contributions"
+          value={String(result.throughput.num_contributions)}
+          variant={result.variant}
+        />
+        <MetricCard label={avgFeeLabel} value={avgFeeValue} variant={result.variant} />
+      </div>
+
+      {/* Cost-to-performance highlight — the thesis' primary comparison metric */}
+      <div className="rounded-lg border border-yellow-800/50 bg-yellow-900/10 px-4 py-3 flex items-center gap-4">
+        <div>
+          <p className="text-xs text-yellow-500 font-medium uppercase tracking-wide">
+            Cost-to-Performance Ratio
+          </p>
+          <p className="text-xs text-yellow-300/60 mt-0.5">
+            Avg fee units ÷ TPS — lower = more efficient per unit of throughput
+          </p>
+        </div>
+        <span className="ml-auto font-mono text-xl font-bold text-yellow-400">
+          {deriveCostPerTps(result)}
+        </span>
+      </div>
+
+      {/* Limitations */}
+      {result.limitations.length > 0 && (
+        <div className="rounded border border-orange-900 bg-orange-900/10 px-4 py-3">
+          <p className="text-xs text-orange-400 font-medium mb-1">Limitations</p>
+          <ul className="space-y-0.5">
+            {result.limitations.map((note, i) => (
+              <li key={i} className="text-xs text-orange-300/70">
+                • {note}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Per-operation breakdown */}
+      <div>
+        <h3 className="text-xs uppercase tracking-widest text-gray-500 mb-2">Operations</h3>
+        <OperationsTable operations={result.operations} platform={result.platform} />
+      </div>
+    </section>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+
+export default function DashboardPage() {
+  const [results, setResults] = useState<BenchmarkFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const [variant, setVariant] = useState("all");
+  const [client, setClient] = useState("all");
+  const [environment, setEnvironment] = useState("all");
+
+  const [selected, setSelected] = useState<BenchmarkFile | null>(null);
+
+  const fetchResults = useCallback(async () => {
+    setFetchError(null);
+    try {
+      const res = await fetch("/api/benchmarks");
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const data: BenchmarkFile[] = await res.json();
+      setResults(data);
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchResults();
+  }, [fetchResults]);
+
+  const filtered = results.filter((r) => {
+    if (variant !== "all" && r.variant !== variant) return false;
+    if (client !== "all" && r.client !== client) return false;
+    if (environment !== "all" && r.environment !== environment) return false;
+    return true;
+  });
+
+  // Keep the selected result valid after filter or data changes
+  useEffect(() => {
+    if (!selected || !filtered.includes(selected)) {
+      setSelected(filtered[0] ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant, client, environment, results]);
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white">
+      {/* Header */}
+      <header className="border-b border-gray-800 px-6 py-4">
+        <h1 className="text-lg font-bold font-mono text-white tracking-tight">
+          Multi-Chain Crowdfunding Benchmark Dashboard
+        </h1>
+        <p className="text-xs text-gray-500 mt-0.5">
+          EVM (Sepolia) vs Solana (Devnet) — gas · latency · throughput · cost efficiency
+        </p>
+      </header>
+
+      <div className="flex flex-col xl:flex-row min-h-[calc(100vh-65px)]">
+        {/* ── Main content ── */}
+        <main className="flex-1 p-6 space-y-6 min-w-0">
+          <FilterBar
+            results={results}
+            variant={variant}
+            setVariant={setVariant}
+            client={client}
+            setClient={setClient}
+            environment={environment}
+            setEnvironment={setEnvironment}
+            onRefresh={fetchResults}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+          {loading && (
+            <p className="text-sm text-gray-500 animate-pulse">Loading results…</p>
+          )}
+
+          {fetchError && (
+            <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-4 py-2">
+              Failed to load results: {fetchError}
+            </p>
+          )}
+
+          {!loading && !fetchError && filtered.length === 0 && <EmptyState />}
+
+          {filtered.length > 0 && (
+            <>
+              {/* Clickable result cards — one per benchmark file */}
+              <section>
+                <h2 className="text-xs uppercase tracking-widest text-gray-500 mb-3">
+                  Results ({filtered.length})
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[340px] overflow-y-auto pr-1">
+                  {filtered.map((r) => (
+                    <ResultCard
+                      key={`${r.variant}_${r.client}_${r.environment}`}
+                      result={r}
+                      isSelected={selected === r}
+                      onClick={() => setSelected(r)}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              {/* Side-by-side charts — only meaningful with 2+ results */}
+              {filtered.length > 1 && <CompareChart results={filtered} />}
+
+              {/* Full detail for the selected result */}
+              {selected && <ResultDetail result={selected} />}
+            </>
+          )}
+        </main>
+
+        {/* ── Run sidebar ── */}
+        <aside className="xl:w-80 shrink-0 border-t xl:border-t-0 xl:border-l border-gray-800">
+          <RunPanel onRunComplete={fetchResults} />
+        </aside>
+      </div>
     </div>
   );
 }

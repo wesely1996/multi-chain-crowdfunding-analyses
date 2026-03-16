@@ -980,6 +980,103 @@ These must be acknowledged in the thesis methodology section:
 
 ---
 
+## Dashboard (`dashboard/`)
+
+A Next.js 14 web application that visualises benchmark results and can trigger live
+benchmark runs from the browser.
+
+### Prerequisites
+
+- Node.js 20.x LTS (same as the rest of the TypeScript tooling)
+- Benchmark result files in `benchmarks/results/` (schema v2 JSON)
+
+### Install and start (development)
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+The dev server hot-reloads on file changes. For a production build:
+
+```bash
+npm run build
+npm start
+```
+
+### What it does
+
+| Feature | Details |
+| ------- | ------- |
+| Results overview | Loads all schema v2 `*.json` files from `benchmarks/results/`, groups by `(variant, client, environment, kind)`, and shows only the latest file per group |
+| Filter bar | Filter displayed results by variant, client, or environment; refresh button reloads from disk |
+| Result cards | Click a card to drill into per-operation gas/fee, latency, and key metric cards |
+| Comparative charts | Side-by-side TPS and cost-per-TPS bar charts; gas/fee and latency charts per operation |
+| Comparison table | Cross-variant operation table with sortable columns (click a client header to sort by cost/latency) |
+| Run panel (sidebar) | Select variant/client/benchmark type and start a live run; output streams in real time via polling |
+| `/benchmarks` page | Full comparison table + GasChart + LatencyChart + ThroughputChart in one scrollable view |
+| `/run` page | Full-page run form (equivalent to the sidebar panel) |
+
+### API routes
+
+All API routes require the Node.js runtime (`export const runtime = "nodejs"`).
+
+| Route | Method | Description |
+| ----- | ------ | ----------- |
+| `/api/benchmarks` | GET | Returns all loaded `BenchmarkFile[]` objects from `benchmarks/results/` |
+| `/api/run` | POST | Spawns `benchmarks/run_tests.py` (or `--throughput`) as a subprocess; accepts `{ variant, client, kind }` body; returns `{ id, status: "running" }` (HTTP 202) |
+| `/api/run/[id]` | GET | Returns the current status, accumulated stdout/stderr output, and result file path for a run |
+
+Run state is held in-process memory — it resets when the Next.js server restarts.
+
+### Run request body
+
+```json
+{
+  "variant": "V1",
+  "client": "python",
+  "kind": "lifecycle"
+}
+```
+
+Valid values:
+
+| Field | Values |
+| ----- | ------ |
+| `variant` | `V1` `V2` `V3` `V4` `V5` |
+| `client` | `python` `ts` `dotnet` |
+| `kind` | `lifecycle` `throughput` |
+
+The API maps `variant` to its platform (`evm`/`solana`) and environment
+(`sepolia`/`solana-devnet`) automatically, and sets `VARIANT`, `CLIENT`, and
+`BENCHMARK_ENV` environment variables for the subprocess.
+
+> **Note:** V2 and V3 benchmarks require contract artifacts to be configured in
+> `benchmarks/config.py` before triggering a run from the dashboard.
+
+### Result file discovery
+
+The dashboard reads files relative to the repo root — it resolves
+`../benchmarks/results` from the Next.js process working directory
+(`dashboard/`). Start the server from the `dashboard/` directory so this path is correct.
+
+Only schema v2 files (`"schema_version": "2"`) are displayed; legacy files are silently skipped.
+
+### Shared chart constants
+
+Chart components share constants from `dashboard/lib/chart-constants.ts`:
+
+- `VARIANT_COLORS` — per-variant hex palette used in all bar charts
+- `TOOLTIP_STYLE` — Recharts tooltip style object
+- `OPERATION_ORDER` — canonical operation ordering for chart axes
+- `comboKey(r)` — builds `"V1 / python"` style series labels
+- `deduplicateByKey(items)` — filters duplicate bar series by key
+
+---
+
 ## Version Matrix (tested baseline)
 
 | Tool                    | Version         | Scope                                                  |
@@ -1010,3 +1107,6 @@ These must be acknowledged in the thesis methodology section:
 | solders                 | 0.21.0          | Python Solana types (Rust extension)                   |
 | anchorpy                | 0.20.1          | Python Anchor IDL client                               |
 | tabulate                | 0.9.0           | Benchmark table formatting                             |
+| Next.js                 | 14.2.x          | Dashboard web application                              |
+| React                   | 18.x            | Dashboard UI                                           |
+| Recharts                | 3.8.x           | Dashboard charts                                       |
