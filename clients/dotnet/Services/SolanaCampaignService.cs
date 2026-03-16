@@ -16,6 +16,8 @@ public class SolanaCampaignService
     private readonly PublicKey? _campaignAddress;
     private readonly ulong _campaignId;
 
+    private readonly PublicKey _tokenProgram;
+
     public SolanaCampaignService(SolanaConfig config)
     {
         _rpc = ClientFactory.GetClient(config.RpcUrl);
@@ -26,6 +28,9 @@ public class SolanaCampaignService
         _paymentMint = new PublicKey(config.PaymentMint);
         _campaignAddress = string.IsNullOrEmpty(config.CampaignAddress) ? null : new PublicKey(config.CampaignAddress);
         _campaignId = config.CampaignId;
+        _tokenProgram = config.Variant == "V5"
+            ? InstructionBuilder.Token2022Program
+            : InstructionBuilder.DefaultTokenProgram;
     }
 
     private PublicKey ResolveCampaign(string? explicitAddress = null)
@@ -47,7 +52,8 @@ public class SolanaCampaignService
 
         var ix = InstructionBuilder.InitializeCampaign(
             _programId, _signer.PublicKey, campaign, _paymentMint,
-            vault, receiptMint, campaignId, softCap, hardCap, deadline, milestones);
+            vault, receiptMint, campaignId, softCap, hardCap, deadline, milestones,
+            _tokenProgram);
 
         var result = await TransactionHelper.SendAndConfirm(_rpc, _signer, ix);
 
@@ -86,7 +92,7 @@ public class SolanaCampaignService
         var ix = InstructionBuilder.Contribute(
             _programId, _signer.PublicKey, campaign, contributorRecord,
             contributorPaymentAta, vault, contributorReceiptAta,
-            receiptMint, _paymentMint, amount);
+            receiptMint, _paymentMint, amount, _tokenProgram);
 
         var result = await TransactionHelper.SendAndConfirm(_rpc, _signer, ix);
 
@@ -146,7 +152,8 @@ public class SolanaCampaignService
         var milestoneIndex = before?["currentMilestone"];
 
         var ix = InstructionBuilder.WithdrawMilestone(
-            _programId, _signer.PublicKey, campaign, vault, creatorPaymentAta, _paymentMint);
+            _programId, _signer.PublicKey, campaign, vault, creatorPaymentAta, _paymentMint,
+            _tokenProgram);
         var result = await TransactionHelper.SendAndConfirm(_rpc, _signer, ix);
 
         var after = await FetchCampaignState(campaign);
@@ -183,7 +190,7 @@ public class SolanaCampaignService
 
         var ix = InstructionBuilder.Refund(
             _programId, _signer.PublicKey, campaign, contributorRecord,
-            contributorPaymentAta, contributorReceiptAta, vault, receiptMint);
+            contributorPaymentAta, contributorReceiptAta, vault, receiptMint, _tokenProgram);
 
         var result = await TransactionHelper.SendAndConfirm(_rpc, _signer, ix);
 

@@ -8,18 +8,21 @@ import {
   CAMPAIGN_ABI,
   ERC20_ABI,
   DECIMALS,
+  VARIANT,
 } from "./config.js";
 import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
   options: {
     amount: { type: "string", default: "10" },
+    "tier-id": { type: "string", default: "0" },
   },
   strict: false,
 });
 
 async function main() {
   const amountRaw = BigInt(Math.round(Number(values["amount"]!) * 10 ** DECIMALS));
+  const tierId = BigInt(values["tier-id"]!);
   const start = performance.now();
 
   // Step 1: approve
@@ -31,13 +34,23 @@ async function main() {
   });
   const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
 
-  // Step 2: contribute
-  const contributeHash = await walletClient.writeContract({
-    address: CAMPAIGN_ADDRESS,
-    abi: CAMPAIGN_ABI,
-    functionName: "contribute",
-    args: [amountRaw],
-  });
+  // Step 2: contribute (V3 takes tierId, others take amount)
+  let contributeHash: `0x${string}`;
+  if (VARIANT === "V3") {
+    contributeHash = await walletClient.writeContract({
+      address: CAMPAIGN_ADDRESS,
+      abi: CAMPAIGN_ABI,
+      functionName: "contribute",
+      args: [tierId],
+    });
+  } else {
+    contributeHash = await walletClient.writeContract({
+      address: CAMPAIGN_ADDRESS,
+      abi: CAMPAIGN_ABI,
+      functionName: "contribute",
+      args: [amountRaw],
+    });
+  }
   const contributeReceipt = await publicClient.waitForTransactionReceipt({ hash: contributeHash });
   const elapsed = performance.now() - start;
 

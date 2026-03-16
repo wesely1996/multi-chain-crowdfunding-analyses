@@ -154,21 +154,30 @@ Any deviation from these versions must be documented in `docs/measurements.md`.
 | `@solana/web3.js` | 1.95.4 | Solana RPC and transaction building |
 | viem | 2.21.x | EVM client RPC and contract interaction |
 
-### 7.2 Localnet Rationale
+### 7.2 Measurement Environments
 
-`[recommendation]` All performance measurements are taken on localnet (Hardhat in-process node
-for EVM; `solana-test-validator` for Solana) rather than testnet or mainnet. Rationale:
+The thesis uses two tiers of benchmark environments:
 
-- **Determinism**: localnet has no mempool congestion, no validator variability, no fee market
-  fluctuations. Repeated runs produce consistent results.
-- **Cost**: testnet faucets are rate-limited; 50-transaction throughput tests would require
-  significant faucet budget.
-- **Isolation**: localnet runs are unaffected by other users' transactions, ensuring the
-  throughput measurement reflects only the benchmark workload.
+**Tier 1 — Localnet (initial validation only):**
+`[recommendation]` Early-stage runs use localnet (Hardhat in-process node for EVM;
+`solana-test-validator` for Solana) to validate harness correctness and establish gas/fee
+baselines before spending real testnet funds. Rationale:
 
-`[assumption]` Localnet results are directionally representative of devnet behaviour. Absolute
-values (finality time, fee amounts) will differ on devnet/mainnet due to network conditions and
-fee market dynamics. The thesis analysis must acknowledge this limitation.
+- **Determinism**: no mempool congestion, no validator variability, no fee market fluctuations.
+- **Cost**: testnet faucets are rate-limited; 50-transaction throughput tests would exhaust faucet budgets quickly.
+- **Isolation**: unaffected by other users' transactions.
+
+Localnet data is used in `docs/measurements.md` as a reference baseline but is **not displayed
+in the dashboard**.
+
+**Tier 2 — Testnet (dashboard and final thesis data):**
+`[fact]` All dashboard results and final thesis comparative measurements are collected on
+**Sepolia** (EVM variants V1–V3) and **Solana devnet** (Solana variants V4–V5). Testnet data
+captures real network latency, fee market conditions, and slot-confirmation timing.
+
+`[assumption]` Localnet gas unit counts are deterministic and equal to testnet gas units (EVM
+gas is network-independent). Absolute latency and fee values differ on testnet due to network
+conditions and fee market dynamics — the thesis analysis must acknowledge this difference.
 
 ---
 

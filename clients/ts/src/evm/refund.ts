@@ -1,20 +1,40 @@
+import { parseArgs } from "node:util";
 import { decodeEventLog } from "viem";
 import {
   publicClient,
   walletClient,
   CAMPAIGN_ADDRESS,
   CAMPAIGN_ABI,
+  VARIANT,
 } from "./config.js";
 import { printResult, printError } from "../shared/output.js";
 
+const { values } = parseArgs({
+  options: {
+    "tier-id": { type: "string", default: "0" },
+  },
+  strict: false,
+});
+
 async function main() {
+  const tierId = BigInt(values["tier-id"]!);
   const start = performance.now();
 
-  const hash = await walletClient.writeContract({
-    address: CAMPAIGN_ADDRESS,
-    abi: CAMPAIGN_ABI,
-    functionName: "refund",
-  });
+  let hash: `0x${string}`;
+  if (VARIANT === "V3") {
+    hash = await walletClient.writeContract({
+      address: CAMPAIGN_ADDRESS,
+      abi: CAMPAIGN_ABI,
+      functionName: "refund",
+      args: [tierId],
+    });
+  } else {
+    hash = await walletClient.writeContract({
+      address: CAMPAIGN_ADDRESS,
+      abi: CAMPAIGN_ABI,
+      functionName: "refund",
+    });
+  }
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   const elapsed = performance.now() - start;

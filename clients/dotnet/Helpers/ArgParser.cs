@@ -30,6 +30,12 @@ public static class ArgParser
     public static BigInteger ParseBigInt(string[] args, string name, string defaultValue)
         => BigInteger.Parse(ParseArg(args, name, defaultValue));
 
+    public static BigInteger? ParseBigIntOrNull(string[] args, string name)
+    {
+        var val = ParseArgOrNull(args, name);
+        return val != null ? BigInteger.Parse(val) : null;
+    }
+
     public static List<byte> ParseMilestones(string[] args, string name, string defaultValue)
     {
         var raw = ParseArg(args, name, defaultValue);

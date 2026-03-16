@@ -9,6 +9,7 @@ import {
   FACTORY_ABI,
   CAMPAIGN_ABI,
   DECIMALS,
+  VARIANT,
 } from "./config.js";
 import { printResult, printError } from "../shared/output.js";
 
@@ -20,6 +21,9 @@ const { values } = parseArgs({
     milestones: { type: "string", default: "30,30,40" },
     "token-name": { type: "string", default: "Campaign Receipt Token" },
     "token-symbol": { type: "string", default: "CRT" },
+    "tier-prices": { type: "string", default: "10,10,10" },
+    "tier-names": { type: "string", default: "A,B,C" },
+    "token-uri": { type: "string", default: "" },
   },
   strict: false,
 });
@@ -32,15 +36,28 @@ async function main() {
   const milestones = values["milestones"]!.split(",").map(Number);
   const tokenName = values["token-name"]!;
   const tokenSymbol = values["token-symbol"]!;
+  const tierPrices = values["tier-prices"]!.split(",").map((p) => BigInt(Math.round(Number(p) * 10 ** DECIMALS)));
+  const tierNames = values["tier-names"]!.split(",");
+  const tokenUri = values["token-uri"]!;
 
   const start = performance.now();
 
-  const hash = await walletClient.writeContract({
-    address: FACTORY_ADDRESS,
-    abi: FACTORY_ABI,
-    functionName: "createCampaign",
-    args: [PAYMENT_TOKEN_ADDRESS, softCap, hardCap, deadline, milestones, tokenName, tokenSymbol],
-  });
+  let hash: `0x${string}`;
+  if (VARIANT === "V3") {
+    hash = await walletClient.writeContract({
+      address: FACTORY_ADDRESS,
+      abi: FACTORY_ABI,
+      functionName: "createCampaign",
+      args: [PAYMENT_TOKEN_ADDRESS, softCap, hardCap, deadline, milestones, tierPrices, tierNames, tokenUri],
+    });
+  } else {
+    hash = await walletClient.writeContract({
+      address: FACTORY_ADDRESS,
+      abi: FACTORY_ABI,
+      functionName: "createCampaign",
+      args: [PAYMENT_TOKEN_ADDRESS, softCap, hardCap, deadline, milestones, tokenName, tokenSymbol],
+    });
+  }
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   const elapsed = performance.now() - start;
@@ -63,14 +80,19 @@ async function main() {
     }
   }
 
-  // Read receiptToken address from the new campaign
+  // Read receipt/tier token address from the new campaign (variant-dependent)
   let receiptTokenAddress = "";
   if (campaignAddress) {
-    receiptTokenAddress = (await publicClient.readContract({
-      address: campaignAddress as `0x${string}`,
-      abi: CAMPAIGN_ABI,
-      functionName: "receiptToken",
-    })) as string;
+    const tokenFn = VARIANT === "V3" ? "tierToken" : VARIANT === "V2" ? null : "receiptToken";
+    if (tokenFn) {
+      receiptTokenAddress = (await publicClient.readContract({
+        address: campaignAddress as `0x${string}`,
+        abi: CAMPAIGN_ABI,
+        functionName: tokenFn,
+      })) as string;
+    } else {
+      receiptTokenAddress = campaignAddress; // V2: campaign IS the vault/receipt token
+    }
   }
 
   printResult({

@@ -219,14 +219,18 @@ def convert(src_path, dst_path):
 
 
 if __name__ == '__main__':
+    import argparse
     import pathlib
     repo_root = pathlib.Path(__file__).resolve().parent.parent
     idl_dir = repo_root / 'contracts' / 'solana' / 'target' / 'idl'
-    src_path = str(idl_dir / 'crowdfunding.json')
-    dst_path = str(idl_dir / 'crowdfunding.python.json')
 
-    out = convert(src_path, dst_path)
-    print(f'Written: {dst_path}')
+    parser = argparse.ArgumentParser(description='Convert Anchor 0.32 IDL to anchorpy-core 0.2 format')
+    parser.add_argument('--src', default=str(idl_dir / 'crowdfunding.json'))
+    parser.add_argument('--dst', default=str(idl_dir / 'crowdfunding.python.json'))
+    args = parser.parse_args()
+
+    out = convert(args.src, args.dst)
+    print(f'Written: {args.dst}')
     print(f'  instructions : {[ix["name"] for ix in out["instructions"]]}')
     print(f'  accounts     : {[a["name"] for a in out["accounts"]]}')
     print(f'  types        : {[t["name"] for t in out["types"]]}')

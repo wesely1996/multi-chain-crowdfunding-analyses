@@ -11,6 +11,10 @@ import { hardhat } from "viem/chains";
 
 import factoryAbi from "../../abi/CrowdfundingFactory.json" with { type: "json" };
 import campaignAbi from "../../abi/CrowdfundingCampaign.json" with { type: "json" };
+import v2FactoryAbi from "../../abi/CrowdfundingFactory4626.json" with { type: "json" };
+import v2CampaignAbi from "../../abi/CrowdfundingCampaign4626.json" with { type: "json" };
+import v3FactoryAbi from "../../abi/CrowdfundingFactory1155.json" with { type: "json" };
+import v3CampaignAbi from "../../abi/CrowdfundingCampaign1155.json" with { type: "json" };
 import erc20Abi from "../../abi/MockERC20.json" with { type: "json" };
 
 import { requireEnv, DECIMALS } from "../shared/env.js";
@@ -49,8 +53,22 @@ export const walletClient = createWalletClient({
   transport: http(RPC_URL),
 });
 
-// ── ABIs ────────────────────────────────────────────────────────────────────
+// ── Variant-aware ABI selection ──────────────────────────────────────────────
 
-export const FACTORY_ABI = factoryAbi;
-export const CAMPAIGN_ABI = campaignAbi;
+export const VARIANT = process.env["VARIANT"] ?? "V1";
+
+const FACTORY_ABI_MAP: Record<string, unknown[]> = {
+  V1: factoryAbi as unknown[],
+  V2: v2FactoryAbi as unknown[],
+  V3: v3FactoryAbi as unknown[],
+};
+
+const CAMPAIGN_ABI_MAP: Record<string, unknown[]> = {
+  V1: campaignAbi as unknown[],
+  V2: v2CampaignAbi as unknown[],
+  V3: v3CampaignAbi as unknown[],
+};
+
+export const FACTORY_ABI = FACTORY_ABI_MAP[VARIANT] ?? factoryAbi;
+export const CAMPAIGN_ABI = CAMPAIGN_ABI_MAP[VARIANT] ?? campaignAbi;
 export const ERC20_ABI = erc20Abi;

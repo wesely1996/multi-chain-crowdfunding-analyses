@@ -5,6 +5,8 @@ import { Program } from "@coral-xyz/anchor";
 import fs from "node:fs";
 import os from "node:os";
 import idlJson from "../../idl/crowdfunding.json" with { type: "json" };
+import idlToken2022Json from "../../idl/crowdfunding_token2022.json" with { type: "json" };
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 
 import { requireEnv, DECIMALS } from "../shared/env.js";
 
@@ -16,6 +18,10 @@ export const SOLANA_PROGRAM_ID = requireEnv("SOLANA_PROGRAM_ID");
 export const SOLANA_PAYMENT_MINT = requireEnv("SOLANA_PAYMENT_MINT");
 export const SOLANA_CAMPAIGN_ADDRESS = process.env["SOLANA_CAMPAIGN_ADDRESS"] ?? "";
 export const SOLANA_CAMPAIGN_ID = process.env["SOLANA_CAMPAIGN_ID"] ?? "0";
+export const VARIANT = process.env["VARIANT"] ?? "V4";
+
+// Select token program based on variant
+export const tokenProgram = VARIANT === "V5" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
 
 export { DECIMALS };
 
@@ -41,7 +47,8 @@ const provider = new anchor.AnchorProvider(connection, anchorWallet, {
 });
 anchor.setProvider(provider);
 
-export const program = new Program(idlJson as any, provider);
+const activeIdl = VARIANT === "V5" ? idlToken2022Json : idlJson;
+export const program = new Program(activeIdl as any, provider);
 
 // ── RPC helper (works around SendTransactionError constructor mismatch) ─────
 

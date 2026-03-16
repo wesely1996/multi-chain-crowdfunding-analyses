@@ -77,12 +77,26 @@ FACTORY_ARTIFACT  = EVM_ARTIFACTS_DIR / "CrowdfundingFactory.sol" / "Crowdfundin
 CAMPAIGN_ARTIFACT = EVM_ARTIFACTS_DIR / "CrowdfundingCampaign.sol" / "CrowdfundingCampaign.json"
 MOCK_ERC20_ARTIFACT = EVM_ARTIFACTS_DIR / "MockERC20.sol" / "MockERC20.json"
 
+# Variant → name of the CampaignCreated event emitted by that factory
+EVM_CAMPAIGN_CREATED_EVENT: dict[str, str] = {
+    "V1": "CampaignCreated",
+    "V2": "CampaignCreated4626",
+    "V3": "CampaignCreated1155",
+}
+
 # Variant → (factory_artifact, campaign_artifact, mock_erc20_artifact)
-# V2/V3 entries added when contracts are implemented.
 EVM_VARIANT_ARTIFACTS: dict[str, tuple[pathlib.Path, pathlib.Path, pathlib.Path]] = {
     "V1": (FACTORY_ARTIFACT, CAMPAIGN_ARTIFACT, MOCK_ERC20_ARTIFACT),
-    # "V2": (EVM_ARTIFACTS_DIR / "CrowdfundingFactoryV2.sol" / "CrowdfundingFactoryV2.json", ...),
-    # "V3": (EVM_ARTIFACTS_DIR / "CrowdfundingFactoryV3.sol" / "CrowdfundingFactoryV3.json", ...),
+    "V2": (
+        EVM_ARTIFACTS_DIR / "CrowdfundingFactory4626.sol" / "CrowdfundingFactory4626.json",
+        EVM_ARTIFACTS_DIR / "CrowdfundingCampaign4626.sol" / "CrowdfundingCampaign4626.json",
+        MOCK_ERC20_ARTIFACT,
+    ),
+    "V3": (
+        EVM_ARTIFACTS_DIR / "CrowdfundingFactory1155.sol" / "CrowdfundingFactory1155.json",
+        EVM_ARTIFACTS_DIR / "CrowdfundingCampaign1155.sol" / "CrowdfundingCampaign1155.json",
+        MOCK_ERC20_ARTIFACT,
+    ),
 }
 
 # Hardhat default mnemonic (deterministic accounts — safe for localnet only)
@@ -129,11 +143,12 @@ SOLANA_PROGRAM_ID: str = os.getenv(
 )
 
 # Variant → (py_idl_path, program_id)
-# V5 entry added when Token-2022 program is implemented.
 SOLANA_VARIANT_ARTIFACTS: dict[str, tuple[pathlib.Path, str]] = {
     "V4": (SOLANA_PY_IDL_PATH, SOLANA_PROGRAM_ID),
-    # "V5": (REPO_ROOT / "contracts" / "solana" / "target" / "idl" / "crowdfunding_v5.python.json",
-    #        "<V5_PROGRAM_ID>"),
+    "V5": (
+        REPO_ROOT / "contracts" / "solana" / "target" / "idl" / "crowdfunding_token2022.python.json",
+        "46xPA3ukhGDwk1w9ZZGCmkmVWuRR1nT9Z3QsPrDNxRyy",
+    ),
 }
 
 # ---------------------------------------------------------------------------

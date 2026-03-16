@@ -202,6 +202,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
         "CAMPAIGN_ADDRESS": deploy_json["campaign"],
         "PAYMENT_TOKEN_ADDRESS": deploy_json["mockERC20"],
         "CHAIN_ID": str(deploy_json.get("chain_id", 31337)),
+        "VARIANT": variant,
     })
 
     deployer_key = os.getenv("EVM_PRIVATE_KEY") or _derive_evm_contributor_key(0)
@@ -219,9 +220,13 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
         contrib_key = _derive_evm_contributor_key(i)
         env = {**base_env, "PRIVATE_KEY": contrib_key}
 
+        if variant == "V3":
+            contrib_extra_args = ["--tier-id", "0"]
+        else:
+            contrib_extra_args = ["--amount", amount_str]
         output, proc_ms = _client_run(
             "contribute",
-            ["--amount", amount_str],
+            contrib_extra_args,
             env,
         )
 
@@ -315,16 +320,30 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
             signed = deployer.sign_transaction(tx)
             return w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(signed.rawTransaction))
 
-        rcpt = _send_deployer(factory.functions.createCampaign(
-            deploy_json["mockERC20"],
-            config.SOFT_CAP_REFUND,
-            config.HARD_CAP,
-            deadline,
-            config.MILESTONES,
-            "Bench Refund",
-            "BRF",
-        ))
-        logs = factory.events.CampaignCreated().process_receipt(rcpt)
+        if variant == "V3":
+            refund_create_fn = factory.functions.createCampaign(
+                deploy_json["mockERC20"],
+                config.SOFT_CAP_REFUND,
+                config.HARD_CAP,
+                deadline,
+                config.MILESTONES,
+                [config.CONTRIB_AMOUNT] * 3,
+                ["A", "B", "C"],
+                "",
+            )
+        else:
+            refund_create_fn = factory.functions.createCampaign(
+                deploy_json["mockERC20"],
+                config.SOFT_CAP_REFUND,
+                config.HARD_CAP,
+                deadline,
+                config.MILESTONES,
+                "Bench Refund",
+                "BRF",
+            )
+        rcpt = _send_deployer(refund_create_fn)
+        event_name = config.EVM_CAMPAIGN_CREATED_EVENT[variant]
+        logs = factory.events[event_name]().process_receipt(rcpt)
         refund_campaign_addr = logs[0]["args"]["campaign"]
         print(f"[{client}] Refund campaign: {refund_campaign_addr}")
 
@@ -339,7 +358,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
             usdc_abi = json.load(fh)["abi"]
         usdc = w3.eth.contract(address=deploy_json["mockERC20"], abi=usdc_abi)
 
-        _, _, campaign_artifact = config.EVM_VARIANT_ARTIFACTS[variant]
+        _, campaign_artifact, _ = config.EVM_VARIANT_ARTIFACTS[variant]
         # campaign artifact loaded for abi
         with open(campaign_artifact) as fh:
             campaign_abi_data = json.load(fh)["abi"]
@@ -357,7 +376,8 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
             signed = acc.sign_transaction(approve_tx)
             w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(signed.rawTransaction))
             # Contribute
-            contrib_tx = campaign_ref.functions.contribute(config.CONTRIB_AMOUNT).build_transaction({
+            contrib_fn = campaign_ref.functions.contribute(0) if variant == "V3" else campaign_ref.functions.contribute(config.CONTRIB_AMOUNT)
+            contrib_tx = contrib_fn.build_transaction({
                 "from": acc.address,
                 "nonce": w3.eth.get_transaction_count(acc.address),
                 "gas": 300_000,
@@ -376,7 +396,8 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
             print(f"[{client}] refund() for contributor #{i}...")
             contrib_key = _derive_evm_contributor_key(i)
             env = {**base_env, "PRIVATE_KEY": contrib_key}
-            output, proc_ms = _client_run("refund", [], env)
+            refund_extra_args = ["--tier-id", "0"] if variant == "V3" else []
+            output, proc_ms = _client_run("refund", refund_extra_args, env)
             operations.append({
                 "name": "refund",
                 "scenario": "refund",
@@ -480,14 +501,16 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
             return _run_dotnet(operation, extra_args, env, dotnet_dir, solana=True)
 
     async def _run() -> dict:
+        TOKEN_2022_PROGRAM_ID = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+        token_prog = TOKEN_2022_PROGRAM_ID if variant == "V5" else TOKEN_PROGRAM_ID
+
+        py_idl_path, program_id_str = config.SOLANA_VARIANT_ARTIFACTS[variant]
+
         with open(config.SOLANA_WALLET_PATH) as fh:
             payer = Keypair.from_bytes(bytes(json.load(fh)))
         client_rpc = AsyncClient(config.SOLANA_RPC_URL, commitment=Confirmed)
 
-        program_id_str = config.SOLANA_PROGRAM_ID
-        _, py_idl_path = config.SOLANA_VARIANT_ARTIFACTS.get(variant, (config.SOLANA_PY_IDL_PATH, config.SOLANA_PROGRAM_ID))
-
-        with open(config.SOLANA_PY_IDL_PATH) as fh:
+        with open(py_idl_path) as fh:
             idl = Idl.from_json(fh.read())
         program_id = Pubkey.from_string(program_id_str)
         wallet = Wallet(payer)
@@ -505,7 +528,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         await asyncio.sleep(2)
 
         payment_mint = await SPLAsyncToken.create_mint(
-            client_rpc, payer, payer.pubkey(), 6, TOKEN_PROGRAM_ID
+            client_rpc, payer, payer.pubkey(), 6, token_prog
         )
         payment_mint_pubkey = payment_mint.pubkey
 
@@ -546,7 +569,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
                 accounts={
                     "creator": creator_kp.pubkey(), "campaign": campaign_pda,
                     "payment_mint": payment_mint_pubkey, "vault": vault_pda,
-                    "receipt_mint": receipt_mint_pda, "token_program": TOKEN_PROGRAM_ID,
+                    "receipt_mint": receipt_mint_pda, "token_program": token_prog,
                     "system_program": SYSTEM_PROGRAM_ID, "rent": RENT,
                 },
                 signers=[creator_kp],
@@ -557,7 +580,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         print(f"[solana_setup] Campaign: {campaign_addr}")
 
         # Pre-create receipt ATAs
-        receipt_spl = SPLAsyncToken(client_rpc, receipt_mint_pda, TOKEN_PROGRAM_ID, payer)
+        receipt_spl = SPLAsyncToken(client_rpc, receipt_mint_pda, token_prog, payer)
         for c in contributors:
             await receipt_spl.create_account(c.pubkey())
         await asyncio.sleep(1)
@@ -584,6 +607,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
             "SOLANA_CAMPAIGN_ADDRESS": campaign_addr,
             "SOLANA_CAMPAIGN_ID": str(campaign_id_val),
             "SOLANA_KEYPAIR_PATH": config.SOLANA_WALLET_PATH,
+            "VARIANT": variant,
         }
 
         operations: list[dict] = []
@@ -625,7 +649,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
                 accounts={
                     "creator": creator_kp.pubkey(), "campaign": fc_pda,
                     "payment_mint": payment_mint_pubkey, "vault": fc_vault,
-                    "receipt_mint": fc_receipt, "token_program": TOKEN_PROGRAM_ID,
+                    "receipt_mint": fc_receipt, "token_program": token_prog,
                     "system_program": SYSTEM_PROGRAM_ID, "rent": RENT,
                 },
                 signers=[creator_kp],
@@ -636,7 +660,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         # One contribution to meet softCap
         fc_c = contributors[0]
         await payment_mint.mint_to(payment_atas[0], payer, config.CONTRIB_AMOUNT, opts=skip_opts)
-        fc_receipt_spl = SPLAsyncToken(client_rpc, fc_receipt, TOKEN_PROGRAM_ID, payer)
+        fc_receipt_spl = SPLAsyncToken(client_rpc, fc_receipt, token_prog, payer)
         fc_receipt_ata = await fc_receipt_spl.create_account(fc_c.pubkey())
         fc_contrib_record = _pda([b"contributor", bytes(fc_pda), bytes(fc_c.pubkey())])
         sig = await program.rpc["contribute"](
@@ -650,7 +674,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
                     "contributor_receipt_ata": fc_receipt_ata,
                     "receipt_mint": fc_receipt,
                     "payment_mint": payment_mint_pubkey,
-                    "token_program": TOKEN_PROGRAM_ID,
+                    "token_program": token_prog,
                     "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
                     "system_program": SYSTEM_PROGRAM_ID,
                     "rent": RENT,
@@ -712,7 +736,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
                 accounts={
                     "creator": creator_kp.pubkey(), "campaign": ref_pda,
                     "payment_mint": payment_mint_pubkey, "vault": ref_vault,
-                    "receipt_mint": ref_receipt, "token_program": TOKEN_PROGRAM_ID,
+                    "receipt_mint": ref_receipt, "token_program": token_prog,
                     "system_program": SYSTEM_PROGRAM_ID, "rent": RENT,
                 },
                 signers=[creator_kp],
@@ -720,7 +744,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         )
         await client_rpc.confirm_transaction(sig, commitment=Confirmed)
 
-        ref_receipt_spl = SPLAsyncToken(client_rpc, ref_receipt, TOKEN_PROGRAM_ID, payer)
+        ref_receipt_spl = SPLAsyncToken(client_rpc, ref_receipt, token_prog, payer)
         from spl.token.instructions import get_associated_token_address
         for i_r, c in enumerate(contributors[:n_refund]):
             await payment_mint.mint_to(payment_atas[i_r], payer, config.CONTRIB_AMOUNT, opts=skip_opts)
@@ -737,7 +761,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
                         "contributor_receipt_ata": ref_ra,
                         "receipt_mint": ref_receipt,
                         "payment_mint": payment_mint_pubkey,
-                        "token_program": TOKEN_PROGRAM_ID,
+                        "token_program": token_prog,
                         "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
                         "system_program": SYSTEM_PROGRAM_ID,
                         "rent": RENT,

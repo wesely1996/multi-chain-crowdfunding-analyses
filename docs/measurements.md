@@ -384,9 +384,12 @@ Benchmark script: `contracts/solana/scripts/benchmark_token2022.ts`.
 
 ## Cross-Chain Summary Tables
 
-> **Localnet baseline.** USD fiat costs require testnet runs (Sepolia / devnet) with a known
-> gas price or SOL price at time of measurement. All fiat cells are `—` (pending) until
-> M-V1-2 and M-V4-2 are completed. No fiat values have been invented or estimated.
+> **Localnet baseline (reference only).** The tables below are localnet measurements used for
+> harness validation and initial gas/fee baselines. These figures are **not displayed in the
+> dashboard**. The dashboard exclusively shows Sepolia (EVM) and Solana devnet (Solana) results.
+> USD fiat costs require testnet runs with a known gas price or SOL price at time of measurement.
+> All fiat cells are `—` (pending) until M-V1-2 and M-V4-2 are completed on testnet.
+> No fiat values have been invented or estimated.
 >
 > **EVM latency annotation.** Hardhat automines every transaction synchronously; there is no
 > mempool wait or block propagation. EVM latency values below reflect local RPC roundtrip

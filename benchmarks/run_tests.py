@@ -147,10 +147,12 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
             "tx_hash": receipt["transactionHash"].hex(),
         }
 
+    factory_artifact, campaign_artifact_path, mock_erc20_artifact = config.EVM_VARIANT_ARTIFACTS[variant]
+
     # ── Deploy MockERC20 ────────────────────────────────────────────────────
     print("[evm] Deploying MockERC20...")
-    usdc_abi = _load_abi(config.MOCK_ERC20_ARTIFACT)
-    with open(config.MOCK_ERC20_ARTIFACT) as fh:
+    usdc_abi = _load_abi(mock_erc20_artifact)
+    with open(mock_erc20_artifact) as fh:
         usdc_bytecode = json.load(fh)["bytecode"]
 
     usdc_contract = w3.eth.contract(abi=usdc_abi, bytecode=usdc_bytecode)
@@ -168,15 +170,15 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
 
     # ── Deploy Factory ──────────────────────────────────────────────────────
     print("[evm] Deploying CrowdfundingFactory...")
-    factory_abi = _load_abi(config.FACTORY_ARTIFACT)
-    with open(config.FACTORY_ARTIFACT) as fh:
+    factory_abi = _load_abi(factory_artifact)
+    with open(factory_artifact) as fh:
         factory_bytecode = json.load(fh)["bytecode"]
 
     factory_contract = w3.eth.contract(abi=factory_abi, bytecode=factory_bytecode)
     deploy_tx = factory_contract.constructor().build_transaction({
         "from": deployer_acc.address,
         "nonce": w3.eth.get_transaction_count(deployer_acc.address),
-        "gas": 3_000_000,
+        "gas": 8_000_000,
         "gasPrice": w3.eth.gas_price,
     })
     signed_deploy = deployer_acc.sign_transaction(deploy_tx)
@@ -185,22 +187,34 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     factory = w3.eth.contract(address=factory_addr, abi=factory_abi)
     print(f"[evm] Factory: {factory_addr}")
 
-    campaign_abi = _load_abi(config.CAMPAIGN_ARTIFACT)
+    campaign_abi = _load_abi(campaign_artifact_path)
 
     def _create_campaign(soft_cap: int) -> str:
         """Deploy a campaign via factory; return campaign address."""
         # Use node's block timestamp (not wall clock) — Hardhat time drifts after evm_increaseTime
         block_ts = w3.eth.get_block("latest")["timestamp"]
         deadline = block_ts + config.DEADLINE_DAYS * 86400
-        call = factory.functions.createCampaign(
-            usdc_addr,
-            soft_cap,
-            config.HARD_CAP,
-            deadline,
-            config.MILESTONES,
-            "Bench Token",
-            "BT",
-        )
+        if variant == "V3":
+            call = factory.functions.createCampaign(
+                usdc_addr,
+                soft_cap,
+                config.HARD_CAP,
+                deadline,
+                config.MILESTONES,
+                [config.CONTRIB_AMOUNT] * 3,
+                ["A", "B", "C"],
+                "",
+            )
+        else:
+            call = factory.functions.createCampaign(
+                usdc_addr,
+                soft_cap,
+                config.HARD_CAP,
+                deadline,
+                config.MILESTONES,
+                "Bench Token",
+                "BT",
+            )
         tx = call.build_transaction({
             "from": deployer_acc.address,
             "nonce": w3.eth.get_transaction_count(deployer_acc.address),
@@ -210,7 +224,8 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
         signed = deployer_acc.sign_transaction(tx)
         rcpt = w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(signed.rawTransaction))
         # Parse CampaignCreated event to extract address
-        logs = factory.events.CampaignCreated().process_receipt(rcpt)
+        event_name = config.EVM_CAMPAIGN_CREATED_EVENT[variant]
+        logs = factory.events[event_name]().process_receipt(rcpt)
         return logs[0]["args"]["campaign"]
 
     # ========================================================================
@@ -248,7 +263,7 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     throughput_start = _ms()
 
     for i, acc in enumerate(contributor_accs):
-        call = campaign.functions.contribute(config.CONTRIB_AMOUNT)
+        call = campaign.functions.contribute(0) if variant == "V3" else campaign.functions.contribute(config.CONTRIB_AMOUNT)
         tx = call.build_transaction({
             "from": acc.address,
             "nonce": w3.eth.get_transaction_count(acc.address),
@@ -325,7 +340,7 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
 
     # contribute (not timed for refund path — TPS measured in success path)
     for acc in contributor_accs[:n_refund]:
-        call = campaign_ref.functions.contribute(config.CONTRIB_AMOUNT)
+        call = campaign_ref.functions.contribute(0) if variant == "V3" else campaign_ref.functions.contribute(config.CONTRIB_AMOUNT)
         tx = call.build_transaction({
             "from": acc.address,
             "nonce": w3.eth.get_transaction_count(acc.address),
@@ -352,7 +367,7 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     refund_ops: list[dict] = []
     for acc in contributor_accs[:n_refund]:
         print(f"[evm] refund() for {acc.address[:10]}...")
-        call = campaign_ref.functions.refund()
+        call = campaign_ref.functions.refund(0) if variant == "V3" else campaign_ref.functions.refund()
         tx = call.build_transaction({
             "from": acc.address,
             "nonce": w3.eth.get_transaction_count(acc.address),
@@ -431,14 +446,18 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
 
     import asyncio
 
+    TOKEN_2022_PROGRAM_ID = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+    token_prog = TOKEN_2022_PROGRAM_ID if variant == "V5" else TOKEN_PROGRAM_ID
+
+    py_idl_path, program_id_str = config.SOLANA_VARIANT_ARTIFACTS[variant]
+
     def _load_python_idl() -> "Idl":
-        py_idl_path = config.SOLANA_PY_IDL_PATH
         raw_idl_path = config.SOLANA_RAW_IDL_PATH
 
         if not py_idl_path.exists():
             sys.exit(
                 "[solana] Missing Python-compatible IDL.\n"
-                f"Expected: {py_idl_path}\n"
+                f"Expected: {py_idl_path}\n"  # type: ignore[union-attr]
                 f"Raw Anchor IDL: {raw_idl_path}\n"
                 "Create a Python-validated IDL artifact before running the benchmark.\n"
                 "Suggested workflow:\n"
@@ -465,7 +484,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         wallet = Wallet(payer)
         provider = Provider(client, wallet)
         idl = _load_python_idl()
-        program_id = Pubkey.from_string(config.SOLANA_PROGRAM_ID)
+        program_id = Pubkey.from_string(program_id_str)
         return Program(idl, program_id, provider), program_id
 
     async def _run() -> dict:
@@ -530,11 +549,11 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
 
         # Create mint account via system program + initialize
         from spl.token.async_client import AsyncToken as SPLAsyncToken
-        spl_token = SPLAsyncToken(client, mint_kp.pubkey(), TOKEN_PROGRAM_ID, payer)
+        spl_token = SPLAsyncToken(client, mint_kp.pubkey(), token_prog, payer)
         # WHY: create_mint is a convenience wrapper that creates the account,
         # initializes it, and sets the mint authority to payer.
         payment_mint = await SPLAsyncToken.create_mint(
-            client, payer, payer.pubkey(), 6, TOKEN_PROGRAM_ID
+            client, payer, payer.pubkey(), 6, token_prog
         )
         payment_mint_pubkey = payment_mint.pubkey
 
@@ -590,7 +609,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             "payment_mint": payment_mint_pubkey,
             "vault": vault_pda,
             "receipt_mint": receipt_mint_pda,
-            "token_program": TOKEN_PROGRAM_ID,
+            "token_program": token_prog,
             "system_program": SYSTEM_PROGRAM_ID,
             "rent": RENT,
         }
@@ -643,7 +662,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
                 "contributor_receipt_ata": receipt_ata_addrs[i],
                 "receipt_mint": receipt_mint_pda,
                 "payment_mint": payment_mint_pubkey,
-                "token_program": TOKEN_PROGRAM_ID,
+                "token_program": token_prog,
                 "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
                 "system_program": SYSTEM_PROGRAM_ID,
                 "rent": RENT,
@@ -688,7 +707,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             "payment_mint": payment_mint_pubkey,
             "vault": fc_vault_pda,
             "receipt_mint": fc_receipt_pda,
-            "token_program": TOKEN_PROGRAM_ID,
+            "token_program": token_prog,
             "system_program": SYSTEM_PROGRAM_ID,
             "rent": RENT,
         }
@@ -717,7 +736,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             "contributor_receipt_ata": fc_receipt_ata,
             "receipt_mint": fc_receipt_pda,
             "payment_mint": payment_mint_pubkey,
-            "token_program": TOKEN_PROGRAM_ID,
+            "token_program": token_prog,
             "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
             "system_program": SYSTEM_PROGRAM_ID,
             "rent": RENT,
@@ -766,7 +785,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
                 "vault": fc_vault_pda,
                 "creator_payment_ata": creator_payment_ata,
                 "payment_mint": payment_mint_pubkey,
-                "token_program": TOKEN_PROGRAM_ID,
+                "token_program": token_prog,
             }
             t0 = _ms_now()
             sig = await program.rpc["withdraw_milestone"](
@@ -803,7 +822,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             "payment_mint": payment_mint_pubkey,
             "vault": ref_vault_pda,
             "receipt_mint": ref_receipt_pda,
-            "token_program": TOKEN_PROGRAM_ID,
+            "token_program": token_prog,
             "system_program": SYSTEM_PROGRAM_ID,
             "rent": RENT,
         }
@@ -834,7 +853,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
                 "contributor_receipt_ata": ref_receipt_ata,
                 "receipt_mint": ref_receipt_pda,
                 "payment_mint": payment_mint_pubkey,
-                "token_program": TOKEN_PROGRAM_ID,
+                "token_program": token_prog,
                 "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
                 "system_program": SYSTEM_PROGRAM_ID,
                 "rent": RENT,
@@ -868,7 +887,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
                 "contributor_receipt_ata": c_receipt_ata,
                 "receipt_mint": ref_receipt_pda,
                 "payment_mint": payment_mint_pubkey,
-                "token_program": TOKEN_PROGRAM_ID,
+                "token_program": token_prog,
                 "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
                 "system_program": SYSTEM_PROGRAM_ID,
             }
@@ -952,9 +971,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.platform in ("evm", "both"):
+    # Auto-infer platform from variant when --platform is not explicitly given
+    variant_upper = args.variant.upper()
+    if args.platform == "both":
+        platform = "evm" if variant_upper in ("V1", "V2", "V3") else "solana"
+    else:
+        platform = args.platform
+
+    if platform in ("evm", "both"):
         run_evm(variant=args.variant, client=args.client)
-    if args.platform in ("solana", "both"):
+    if platform in ("solana", "both"):
         run_solana(variant=args.variant, client=args.client)
 
 

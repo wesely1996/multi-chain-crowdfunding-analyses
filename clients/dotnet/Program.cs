@@ -72,11 +72,13 @@ try
                 ArgParser.ParseArg(args, "--token-symbol", "CRT")),
 
             "contribute" => await evmService.Contribute(
-                ArgParser.ParseBigInt(args, "--amount", "10000000")),
+                ArgParser.ParseBigInt(args, "--amount", "10000000"),
+                ArgParser.ParseBigIntOrNull(args, "--tier-id")),
 
             "finalize" => await evmService.Finalize(),
             "withdraw" => await evmService.Withdraw(),
-            "refund" => await evmService.Refund(),
+            "refund" => await evmService.Refund(
+                ArgParser.ParseBigIntOrNull(args, "--tier-id")),
 
             "status" => await evmService.GetStatus(
                 ArgParser.ParseArgOrNull(args, "--contributor")),

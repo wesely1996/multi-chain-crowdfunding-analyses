@@ -118,7 +118,7 @@ def deploy(variant: str, env_name: str) -> dict:
     # ── CrowdfundingFactory ──────────────────────────────────────────────────
     print("[deploy_evm] Deploying CrowdfundingFactory...", file=sys.stderr)
     factory_art = _load_artifact(factory_artifact)
-    factory_addr = _deploy_contract(factory_art["abi"], factory_art["bytecode"])
+    factory_addr = _deploy_contract(factory_art["abi"], factory_art["bytecode"], gas=8_000_000)
     print(f"[deploy_evm] Factory: {factory_addr}", file=sys.stderr)
 
     # ── Create campaign ──────────────────────────────────────────────────────
@@ -127,15 +127,28 @@ def deploy(variant: str, env_name: str) -> dict:
     block_ts = w3.eth.get_block("latest")["timestamp"]
     deadline = block_ts + config.DEADLINE_DAYS * 86400
 
-    tx = factory.functions.createCampaign(
-        usdc_addr,
-        config.SOFT_CAP,
-        config.HARD_CAP,
-        deadline,
-        config.MILESTONES,
-        "Bench Token",
-        "BT",
-    ).build_transaction({
+    if variant == "V3":
+        create_fn = factory.functions.createCampaign(
+            usdc_addr,
+            config.SOFT_CAP,
+            config.HARD_CAP,
+            deadline,
+            config.MILESTONES,
+            [config.CONTRIB_AMOUNT] * 3,
+            ["A", "B", "C"],
+            "",
+        )
+    else:
+        create_fn = factory.functions.createCampaign(
+            usdc_addr,
+            config.SOFT_CAP,
+            config.HARD_CAP,
+            deadline,
+            config.MILESTONES,
+            "Bench Token",
+            "BT",
+        )
+    tx = create_fn.build_transaction({
         "from": deployer.address,
         "nonce": w3.eth.get_transaction_count(deployer.address),
         "gas": 5_000_000,
@@ -145,7 +158,8 @@ def deploy(variant: str, env_name: str) -> dict:
     receipt = w3.eth.wait_for_transaction_receipt(
         w3.eth.send_raw_transaction(signed.rawTransaction)
     )
-    logs = factory.events.CampaignCreated().process_receipt(receipt)
+    event_name = config.EVM_CAMPAIGN_CREATED_EVENT[variant]
+    logs = factory.events[event_name]().process_receipt(receipt)
     campaign_addr = logs[0]["args"]["campaign"]
     print(f"[deploy_evm] Campaign: {campaign_addr}", file=sys.stderr)
 

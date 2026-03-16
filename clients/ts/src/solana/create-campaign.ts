@@ -1,13 +1,13 @@
 import { parseArgs } from "node:util";
 import BN from "bn.js";
 import { SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   connection,
   wallet,
   program,
   paymentMint,
   DECIMALS,
+  tokenProgram,
 } from "./config.js";
 import { campaignPda, vaultPda, receiptMintPda } from "./pda.js";
 import { printResult, printError } from "../shared/output.js";
@@ -44,7 +44,7 @@ async function main() {
       paymentMint,
       vault,
       receiptMint,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenProgram,
       systemProgram: SystemProgram.programId,
       rent: SYSVAR_RENT_PUBKEY,
     } as any)

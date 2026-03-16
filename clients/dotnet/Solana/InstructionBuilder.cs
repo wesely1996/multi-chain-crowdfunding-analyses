@@ -7,7 +7,9 @@ namespace CrowdfundingClient.Solana;
 
 public static class InstructionBuilder
 {
-    private static readonly PublicKey TokenProgram = new("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    public static readonly PublicKey DefaultTokenProgram = new("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    public static readonly PublicKey Token2022Program = new("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+    private static readonly PublicKey TokenProgram = DefaultTokenProgram;
     private static readonly PublicKey AssociatedTokenProgram = new("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
     private static readonly PublicKey SystemProgram = new("11111111111111111111111111111111");
     private static readonly PublicKey RentSysvar = new("SysvarRent111111111111111111111111111111111");
@@ -21,8 +23,10 @@ public static class InstructionBuilder
     public static TransactionInstruction InitializeCampaign(
         PublicKey programId, PublicKey creator, PublicKey campaign,
         PublicKey paymentMint, PublicKey vault, PublicKey receiptMint,
-        ulong campaignId, ulong softCap, ulong hardCap, long deadline, byte[] milestones)
+        ulong campaignId, ulong softCap, ulong hardCap, long deadline, byte[] milestones,
+        PublicKey? tokenProgramOverride = null)
     {
+        var tokenProg = tokenProgramOverride ?? TokenProgram;
         var data = new List<byte>();
         data.AddRange(AnchorDiscriminator("initialize_campaign"));
         data.AddRange(BitConverter.GetBytes(campaignId));
@@ -43,7 +47,7 @@ public static class InstructionBuilder
                 AccountMeta.ReadOnly(paymentMint, false),
                 AccountMeta.Writable(vault, false),
                 AccountMeta.Writable(receiptMint, false),
-                AccountMeta.ReadOnly(TokenProgram, false),
+                AccountMeta.ReadOnly(tokenProg, false),
                 AccountMeta.ReadOnly(SystemProgram, false),
                 AccountMeta.ReadOnly(RentSysvar, false),
             },
@@ -55,8 +59,10 @@ public static class InstructionBuilder
         PublicKey programId, PublicKey contributor, PublicKey campaign,
         PublicKey contributorRecord, PublicKey contributorPaymentAta,
         PublicKey vault, PublicKey contributorReceiptAta,
-        PublicKey receiptMint, PublicKey paymentMint, ulong amount)
+        PublicKey receiptMint, PublicKey paymentMint, ulong amount,
+        PublicKey? tokenProgramOverride = null)
     {
+        var tokenProg = tokenProgramOverride ?? TokenProgram;
         var data = new List<byte>();
         data.AddRange(AnchorDiscriminator("contribute"));
         data.AddRange(BitConverter.GetBytes(amount));
@@ -74,7 +80,7 @@ public static class InstructionBuilder
                 AccountMeta.Writable(contributorReceiptAta, false),
                 AccountMeta.Writable(receiptMint, false),
                 AccountMeta.ReadOnly(paymentMint, false),
-                AccountMeta.ReadOnly(TokenProgram, false),
+                AccountMeta.ReadOnly(tokenProg, false),
                 AccountMeta.ReadOnly(AssociatedTokenProgram, false),
                 AccountMeta.ReadOnly(SystemProgram, false),
                 AccountMeta.ReadOnly(RentSysvar, false),
@@ -100,8 +106,10 @@ public static class InstructionBuilder
 
     public static TransactionInstruction WithdrawMilestone(
         PublicKey programId, PublicKey creator, PublicKey campaign,
-        PublicKey vault, PublicKey creatorPaymentAta, PublicKey paymentMint)
+        PublicKey vault, PublicKey creatorPaymentAta, PublicKey paymentMint,
+        PublicKey? tokenProgramOverride = null)
     {
+        var tokenProg = tokenProgramOverride ?? TokenProgram;
         return new TransactionInstruction
         {
             ProgramId = programId.KeyBytes,
@@ -112,7 +120,7 @@ public static class InstructionBuilder
                 AccountMeta.Writable(vault, false),
                 AccountMeta.Writable(creatorPaymentAta, false),
                 AccountMeta.ReadOnly(paymentMint, false),
-                AccountMeta.ReadOnly(TokenProgram, false),
+                AccountMeta.ReadOnly(tokenProg, false),
             },
             Data = AnchorDiscriminator("withdraw_milestone"),
         };
@@ -122,8 +130,9 @@ public static class InstructionBuilder
         PublicKey programId, PublicKey contributor, PublicKey campaign,
         PublicKey contributorRecord, PublicKey contributorPaymentAta,
         PublicKey contributorReceiptAta, PublicKey vault,
-        PublicKey receiptMint)
+        PublicKey receiptMint, PublicKey? tokenProgramOverride = null)
     {
+        var tokenProg = tokenProgramOverride ?? TokenProgram;
         return new TransactionInstruction
         {
             ProgramId = programId.KeyBytes,
@@ -136,7 +145,7 @@ public static class InstructionBuilder
                 AccountMeta.Writable(contributorReceiptAta, false),
                 AccountMeta.Writable(vault, false),
                 AccountMeta.Writable(receiptMint, false),
-                AccountMeta.ReadOnly(TokenProgram, false),
+                AccountMeta.ReadOnly(tokenProg, false),
                 AccountMeta.ReadOnly(SystemProgram, false),
             },
             Data = AnchorDiscriminator("refund"),

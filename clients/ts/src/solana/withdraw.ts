@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   connection,
   wallet,
@@ -10,6 +10,7 @@ import {
   paymentMint,
   SOLANA_CAMPAIGN_ADDRESS,
   SOLANA_CAMPAIGN_ID,
+  tokenProgram,
 } from "./config.js";
 import { campaignPda, vaultPda } from "./pda.js";
 import { printResult, printError } from "../shared/output.js";
@@ -50,7 +51,7 @@ async function main() {
         vault,
         creatorPaymentAta,
         paymentMint,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram,
       } as any)
       .signers([wallet]),
   );

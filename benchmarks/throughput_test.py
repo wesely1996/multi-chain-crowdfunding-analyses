@@ -105,33 +105,40 @@ def throughput_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -
         signed = sender.sign_transaction(tx)
         return w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(signed.rawTransaction))
 
+    factory_artifact, campaign_artifact_path, mock_erc20_artifact = config.EVM_VARIANT_ARTIFACTS[variant]
+
     # ── Deploy (setup, not timed) ────────────────────────────────────────────
     print("[evm] Deploying contracts (setup)...")
-    with open(config.MOCK_ERC20_ARTIFACT) as fh:
+    with open(mock_erc20_artifact) as fh:
         usdc_art = json.load(fh)
     usdc_contract = w3.eth.contract(abi=usdc_art["abi"], bytecode=usdc_art["bytecode"])
     rcpt = _build_and_send(usdc_contract.constructor("Mock USDC", "USDC"), deployer, gas=3_000_000)
     usdc_addr = rcpt["contractAddress"]
     usdc = w3.eth.contract(address=usdc_addr, abi=usdc_art["abi"])
 
-    with open(config.FACTORY_ARTIFACT) as fh:
+    with open(factory_artifact) as fh:
         factory_art = json.load(fh)
     factory_contract = w3.eth.contract(abi=factory_art["abi"], bytecode=factory_art["bytecode"])
-    rcpt = _build_and_send(factory_contract.constructor(), deployer, gas=3_000_000)
+    rcpt = _build_and_send(factory_contract.constructor(), deployer, gas=8_000_000)
     factory_addr = rcpt["contractAddress"]
     factory = w3.eth.contract(address=factory_addr, abi=factory_art["abi"])
 
     deadline = int(time.time()) + config.DEADLINE_DAYS * 86400
-    rcpt = _build_and_send(
-        factory.functions.createCampaign(
+    if variant == "V3":
+        create_call = factory.functions.createCampaign(
+            usdc_addr, config.SOFT_CAP, config.HARD_CAP, deadline,
+            config.MILESTONES, [config.CONTRIB_AMOUNT] * 3, ["A", "B", "C"], "",
+        )
+    else:
+        create_call = factory.functions.createCampaign(
             usdc_addr, config.SOFT_CAP, config.HARD_CAP, deadline,
             config.MILESTONES, "Bench Token", "BT",
-        ),
-        deployer, gas=5_000_000,
-    )
-    logs = factory.events.CampaignCreated().process_receipt(rcpt)
+        )
+    rcpt = _build_and_send(create_call, deployer, gas=5_000_000)
+    event_name = config.EVM_CAMPAIGN_CREATED_EVENT[variant]
+    logs = factory.events[event_name]().process_receipt(rcpt)
     campaign_addr = logs[0]["args"]["campaign"]
-    campaign_abi = _load_abi(config.CAMPAIGN_ARTIFACT)
+    campaign_abi = _load_abi(campaign_artifact_path)
     campaign = w3.eth.contract(address=campaign_addr, abi=campaign_abi)
     print(f"[evm] Campaign: {campaign_addr}")
 
@@ -149,7 +156,8 @@ def throughput_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -
     t_start = _ms()
     for i, acc in enumerate(contributors):
         t0 = _ms()
-        rcpt = _build_and_send(campaign.functions.contribute(config.CONTRIB_AMOUNT), acc, gas=300_000)
+        contribute_call = campaign.functions.contribute(0) if variant == "V3" else campaign.functions.contribute(config.CONTRIB_AMOUNT)
+        rcpt = _build_and_send(contribute_call, acc, gas=300_000)
         latency = _ms() - t0
         per_tx_gas.append(rcpt["gasUsed"])
         per_tx_latency.append(latency)
@@ -244,16 +252,21 @@ def throughput_solana(variant: str = config.VARIANT, client: str = config.CLIENT
         print(f"Limitation: localnet single-threaded; TPS not representative of production.")
         print("=" * 72)
 
+        TOKEN_2022_PROGRAM_ID = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+        token_prog = TOKEN_2022_PROGRAM_ID if variant == "V5" else TOKEN_PROGRAM_ID
+
+        py_idl_path, program_id_str = config.SOLANA_VARIANT_ARTIFACTS[variant]
+
         with open(config.SOLANA_WALLET_PATH) as fh:
             payer = Keypair.from_bytes(bytes(json.load(fh)))
         client = AsyncClient(config.SOLANA_RPC_URL, commitment=Confirmed)
         wallet = Wallet(payer)
         provider = Provider(client, wallet)
 
-        with open(config.SOLANA_PY_IDL_PATH) as fh:
+        with open(py_idl_path) as fh:
             idl = Idl.from_json(fh.read())
 
-        program_id = Pubkey.from_string(config.SOLANA_PROGRAM_ID)
+        program_id = Pubkey.from_string(program_id_str)
         program = Program(idl, program_id, provider)
 
         def _pda(seeds: list[bytes]) -> Pubkey:
@@ -266,7 +279,7 @@ def throughput_solana(variant: str = config.VARIANT, client: str = config.CLIENT
         await asyncio.sleep(2)
 
         payment_mint = await SPLAsyncToken.create_mint(
-            client, payer, payer.pubkey(), 6, TOKEN_PROGRAM_ID
+            client, payer, payer.pubkey(), 6, token_prog
         )
         creator_kp   = Keypair()
         contributors = [Keypair() for _ in range(config.N_CONTRIBUTIONS)]
@@ -289,7 +302,7 @@ def throughput_solana(variant: str = config.VARIANT, client: str = config.CLIENT
                 accounts={
                     "creator": creator_kp.pubkey(), "campaign": campaign_pda,
                     "payment_mint": payment_mint.pubkey, "vault": vault_pda,
-                    "receipt_mint": receipt_mint_pda, "token_program": TOKEN_PROGRAM_ID,
+                    "receipt_mint": receipt_mint_pda, "token_program": token_prog,
                     "system_program": SYSTEM_PROGRAM_ID, "rent": RENT,
                 },
                 signers=[creator_kp],
@@ -308,7 +321,7 @@ def throughput_solana(variant: str = config.VARIANT, client: str = config.CLIENT
             payment_atas.append(ata)
 
         # Pre-create receipt ATAs (setup, not timed)
-        receipt_spl = SPLAsyncToken(client, receipt_mint_pda, TOKEN_PROGRAM_ID, payer)
+        receipt_spl = SPLAsyncToken(client, receipt_mint_pda, token_prog, payer)
         receipt_atas: list[Pubkey] = []
         for c in contributors:
             ata = await receipt_spl.create_account(c.pubkey())
@@ -335,7 +348,7 @@ def throughput_solana(variant: str = config.VARIANT, client: str = config.CLIENT
                         "contributor_receipt_ata": receipt_atas[i],
                         "receipt_mint": receipt_mint_pda,
                         "payment_mint": payment_mint.pubkey,
-                        "token_program": TOKEN_PROGRAM_ID,
+                        "token_program": token_prog,
                         "associated_token_program": ASSOCIATED_TOKEN_PROGRAM_ID,
                         "system_program": SYSTEM_PROGRAM_ID,
                         "rent": RENT,
@@ -436,9 +449,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.platform in ("evm", "both"):
+    # Auto-infer platform from variant when --platform is not explicitly given
+    variant_upper = args.variant.upper()
+    if args.platform == "both":
+        platform = "evm" if variant_upper in ("V1", "V2", "V3") else "solana"
+    else:
+        platform = args.platform
+
+    if platform in ("evm", "both"):
         throughput_evm(variant=args.variant, client=args.client)
-    if args.platform in ("solana", "both"):
+    if platform in ("solana", "both"):
         throughput_solana(variant=args.variant, client=args.client)
 
 

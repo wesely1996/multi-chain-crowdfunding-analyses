@@ -7,6 +7,7 @@ public record EvmConfig(
     string FactoryAddress,
     string CampaignAddress,
     string PaymentTokenAddress,
+    string Variant = "V1",
     // Gas limits — tunable without recompilation
     long GasCreateCampaign = 3_000_000,
     long GasContribute     = 300_000,
@@ -22,7 +23,8 @@ public record EvmConfig(
         ChainId             : int.Parse(Env("CHAIN_ID", "31337")),
         FactoryAddress      : Env("FACTORY_ADDRESS"),
         CampaignAddress     : Env("CAMPAIGN_ADDRESS"),
-        PaymentTokenAddress : Env("PAYMENT_TOKEN_ADDRESS")
+        PaymentTokenAddress : Env("PAYMENT_TOKEN_ADDRESS"),
+        Variant             : Env("VARIANT", "V1")
     );
 
     private static string Env(string n, string d = "") =>

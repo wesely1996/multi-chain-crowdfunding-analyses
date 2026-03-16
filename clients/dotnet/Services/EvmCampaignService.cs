@@ -94,18 +94,48 @@ public class EvmCampaignService
         _paymentTokenAddress = config.PaymentTokenAddress;
     }
 
+    private string GetFactoryAbi() => _config.Variant switch
+    {
+        "V2" => CrowdfundingFactory4626Abi.ABI,
+        "V3" => CrowdfundingFactory1155Abi.ABI,
+        _ => CrowdfundingFactoryAbi.ABI,
+    };
+
+    private string GetCampaignAbi() => _config.Variant switch
+    {
+        "V2" => CrowdfundingCampaign4626Abi.ABI,
+        "V3" => CrowdfundingCampaign1155Abi.ABI,
+        _ => CrowdfundingCampaignAbi.ABI,
+    };
+
     public async Task<TxOutput> CreateCampaign(BigInteger softCap, BigInteger hardCap,
-        BigInteger deadline, List<byte> milestones, string tokenName, string tokenSymbol)
+        BigInteger deadline, List<byte> milestones, string tokenName, string tokenSymbol,
+        BigInteger[]? tierPrices = null, string[]? tierNames = null, string? tokenUri = null)
     {
         var sw = Stopwatch.StartNew();
-        var contract = _web3.Eth.GetContract(CrowdfundingFactoryAbi.ABI, _factoryAddress);
+        var contract = _web3.Eth.GetContract(GetFactoryAbi(), _factoryAddress);
         var function = contract.GetFunction("createCampaign");
 
-        var txHash = await function.SendTransactionAsync(
-            _web3.TransactionManager.Account.Address,
-            new HexBigInteger(_config.GasCreateCampaign),
-            null,
-            _paymentTokenAddress, softCap, hardCap, deadline, milestones, tokenName, tokenSymbol);
+        string txHash;
+        if (_config.Variant == "V3")
+        {
+            var tp = tierPrices ?? new[] { new BigInteger(10_000_000), new BigInteger(10_000_000), new BigInteger(10_000_000) };
+            var tn = tierNames ?? new[] { "A", "B", "C" };
+            var tu = tokenUri ?? "";
+            txHash = await function.SendTransactionAsync(
+                _web3.TransactionManager.Account.Address,
+                new HexBigInteger(_config.GasCreateCampaign),
+                null,
+                _paymentTokenAddress, softCap, hardCap, deadline, milestones, tp, tn, tu);
+        }
+        else
+        {
+            txHash = await function.SendTransactionAsync(
+                _web3.TransactionManager.Account.Address,
+                new HexBigInteger(_config.GasCreateCampaign),
+                null,
+                _paymentTokenAddress, softCap, hardCap, deadline, milestones, tokenName, tokenSymbol);
+        }
         var receipt = await WaitForReceipt(txHash);
         sw.Stop();
 
@@ -113,12 +143,17 @@ public class EvmCampaignService
         var events = receipt.DecodeAllEvents<CampaignCreatedEvent>();
         var campaignAddress = events.Count > 0 ? events[0].Event.Campaign : "";
 
-        // Read receiptToken from the new campaign
+        // Read receipt/tier token from the new campaign
         var receiptToken = "";
         if (!string.IsNullOrEmpty(campaignAddress))
         {
-            var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, campaignAddress);
-            receiptToken = await campaign.GetFunction("receiptToken").CallAsync<string>();
+            var campaign = _web3.Eth.GetContract(GetCampaignAbi(), campaignAddress);
+            if (_config.Variant == "V3")
+                receiptToken = await campaign.GetFunction("tierToken").CallAsync<string>();
+            else if (_config.Variant == "V2")
+                receiptToken = campaignAddress; // V2: campaign IS the ERC-4626 vault
+            else
+                receiptToken = await campaign.GetFunction("receiptToken").CallAsync<string>();
         }
 
         return new TxOutput
@@ -140,7 +175,7 @@ public class EvmCampaignService
         };
     }
 
-    public async Task<TxOutput> Contribute(BigInteger amount)
+    public async Task<TxOutput> Contribute(BigInteger amount, BigInteger? tierId = null)
     {
         var sw = Stopwatch.StartNew();
         var sender = _web3.TransactionManager.Account.Address;
@@ -152,10 +187,20 @@ public class EvmCampaignService
                 _campaignAddress, amount);
         var approveReceipt = await WaitForReceipt(approveTxHash);
 
-        // Step 2: contribute
-        var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
-        var contributeTxHash = await campaign.GetFunction("contribute")
-            .SendTransactionAsync(sender, new HexBigInteger(_config.GasContribute), null, amount);
+        // Step 2: contribute (V3 uses tierId, others use amount)
+        var campaign = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
+        string contributeTxHash;
+        if (_config.Variant == "V3")
+        {
+            var tid = tierId ?? BigInteger.Zero;
+            contributeTxHash = await campaign.GetFunction("contribute")
+                .SendTransactionAsync(sender, new HexBigInteger(_config.GasContribute), null, tid);
+        }
+        else
+        {
+            contributeTxHash = await campaign.GetFunction("contribute")
+                .SendTransactionAsync(sender, new HexBigInteger(_config.GasContribute), null, amount);
+        }
         var receipt = await WaitForReceipt(contributeTxHash);
         sw.Stop();
 
@@ -187,7 +232,7 @@ public class EvmCampaignService
     public async Task<TxOutput> Finalize()
     {
         var sw = Stopwatch.StartNew();
-        var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
+        var campaign = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
         var txHash = await campaign.GetFunction("finalize")
             .SendTransactionAsync(_web3.TransactionManager.Account.Address,
                 new HexBigInteger(_config.GasFinalize), null);
@@ -217,7 +262,7 @@ public class EvmCampaignService
     public async Task<TxOutput> Withdraw()
     {
         var sw = Stopwatch.StartNew();
-        var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
+        var campaign = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
         var txHash = await campaign.GetFunction("withdrawMilestone")
             .SendTransactionAsync(_web3.TransactionManager.Account.Address,
                 new HexBigInteger(_config.GasWithdraw), null);
@@ -244,13 +289,24 @@ public class EvmCampaignService
         };
     }
 
-    public async Task<TxOutput> Refund()
+    public async Task<TxOutput> Refund(BigInteger? tierId = null)
     {
         var sw = Stopwatch.StartNew();
-        var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
-        var txHash = await campaign.GetFunction("refund")
-            .SendTransactionAsync(_web3.TransactionManager.Account.Address,
-                new HexBigInteger(_config.GasRefund), null);
+        var campaign = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
+        string txHash;
+        if (_config.Variant == "V3")
+        {
+            var tid = tierId ?? BigInteger.Zero;
+            txHash = await campaign.GetFunction("refund")
+                .SendTransactionAsync(_web3.TransactionManager.Account.Address,
+                    new HexBigInteger(_config.GasRefund), null, tid);
+        }
+        else
+        {
+            txHash = await campaign.GetFunction("refund")
+                .SendTransactionAsync(_web3.TransactionManager.Account.Address,
+                    new HexBigInteger(_config.GasRefund), null);
+        }
         var receipt = await WaitForReceipt(txHash);
         sw.Stop();
 
@@ -277,7 +333,7 @@ public class EvmCampaignService
     public async Task<TxOutput> GetStatus(string? contributorAddress = null)
     {
         var sw = Stopwatch.StartNew();
-        var campaign = _web3.Eth.GetContract(CrowdfundingCampaignAbi.ABI, _campaignAddress);
+        var campaign = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
 
         var creator = await campaign.GetFunction("creator").CallAsync<string>();
         var softCap = await campaign.GetFunction("softCap").CallAsync<BigInteger>();
