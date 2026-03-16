@@ -1,8 +1,12 @@
 # Multi-Chain Crowdfunding Smart Contract
 
 **Master's Thesis** — Department of Information Technology
+
 **Student:** Nikola Veselinović (53m/24)
+
 **Supervisor:** Prof. dr Lidija Foror
+
+**GitHubRepo:** https://github.com/wesely1996/multi-chain-crowdfunding-analyses
 
 ## Overview
 
