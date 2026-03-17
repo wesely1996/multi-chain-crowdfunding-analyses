@@ -389,7 +389,7 @@ describe("crowdfunding_token2022", () => {
         ID_SHORT_SUCCESS,
         new anchor.BN(100_000_000),
         new anchor.BN(500_000_000),
-        new anchor.BN(onChainNow + 4), // 4-second deadline relative to validator clock
+        new anchor.BN(onChainNow + 10), // 10-second deadline — poll waits for on-chain clock
         Buffer.from([100])      // single milestone — full sweep
       )
       .accounts({
@@ -450,8 +450,8 @@ describe("crowdfunding_token2022", () => {
       .signers([contributor])
       .rpc();
 
-    // Wait for deadline.
-    await sleep(6000);
+    // Poll until on-chain clock passes the deadline — independent of wall-clock skew.
+    { let t = 0; while (t <= onChainNow + 10) { await sleep(500); const s = await connection.getSlot(); t = (await connection.getBlockTime(s)) ?? t; } }
 
     await program.methods
       .finalize()
@@ -481,7 +481,7 @@ describe("crowdfunding_token2022", () => {
         ID_FAIL,
         new anchor.BN(100_000_000),
         new anchor.BN(500_000_000),
-        new anchor.BN(onChainNow + 15), // 15-second deadline — ATA creation takes a few seconds
+        new anchor.BN(onChainNow + 10), // 10-second deadline — poll waits for on-chain clock
         Buffer.from([100])
       )
       .accounts({
@@ -542,8 +542,8 @@ describe("crowdfunding_token2022", () => {
       .signers([contributor])
       .rpc();
 
-    // Wait for deadline.
-    await sleep(12000);
+    // Poll until on-chain clock passes the deadline.
+    { let t = 0; while (t <= onChainNow + 10) { await sleep(500); const s = await connection.getSlot(); t = (await connection.getBlockTime(s)) ?? t; } }
 
     await program.methods
       .finalize()

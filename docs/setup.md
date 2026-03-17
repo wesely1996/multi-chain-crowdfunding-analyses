@@ -63,9 +63,11 @@ cd contracts/solana && anchor deploy
 ### Step 3 — Python benchmark harness
 
 ```bash
+# From repo root — create (or reuse) the shared venv
 cd benchmarks
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+pip install -r ../clients/python/requirements.txt
 
 # EVM lifecycle (Hardhat node must be running)
 VARIANT=V1 CLIENT=python python run_tests.py --platform evm
@@ -81,6 +83,18 @@ VARIANT=V5 CLIENT=python python run_tests.py --platform solana
 
 # Aggregate and compare
 python collect_metrics.py
+```
+
+As a subprocess-driven client in the benchmark harness:
+
+```bash
+python benchmarks/run_client_benchmark.py \
+    --platform evm --client python --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+
+python benchmarks/run_throughput_client.py \
+    --platform evm --client python --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
 ```
 
 ### Step 4 — TypeScript client
@@ -105,7 +119,31 @@ npm run sol:finalize && npm run sol:withdraw
 npm run sol:status
 ```
 
-### Step 5 — Dashboard
+### Step 5 — Python client
+
+The Python client (`clients/python/`) is a proper CLI client that mirrors the TypeScript and .NET clients. It shares the venv created in Step 3.
+
+```bash
+# Activate the venv from Step 3 (if not already active)
+source benchmarks/.venv/bin/activate
+
+# EVM lifecycle (Hardhat node must be running; addresses from Step 1 deploy)
+FACTORY_ADDRESS=0x... CAMPAIGN_ADDRESS=0x... PAYMENT_TOKEN_ADDRESS=0x... \
+  python -m clients.python evm:status
+
+FACTORY_ADDRESS=0x... CAMPAIGN_ADDRESS=0x... PAYMENT_TOKEN_ADDRESS=0x... \
+PRIVATE_KEY=0x... \
+  python -m clients.python evm:contribute --amount 10000000
+
+# Solana lifecycle (solana-test-validator + anchor deploy must be running)
+SOLANA_CAMPAIGN_ADDRESS=... SOLANA_PAYMENT_MINT=... \
+  python -m clients.python sol:contribute --amount 10000000
+
+SOLANA_CAMPAIGN_ADDRESS=... \
+  python -m clients.python sol:status
+```
+
+### Step 6 — Dashboard
 
 ```bash
 cd dashboard
@@ -773,13 +811,29 @@ records per-operation cost and latency, and prints a cross-chain comparison tabl
 
 ### Install (Ubuntu / Linux)
 
-On Linux, prebuilt wheels exist for all dependencies — a standard venv install works:
+Due to the `lru-dict` version conflict with web3, install in stages (same as Windows):
 
 ```bash
 cd benchmarks
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+
+# 1. web3 without deps (avoids lru-dict<1.3.0 constraint)
+python -m pip install --no-deps web3==6.20.3
+
+# 2. lru-dict 1.3.0 (has prebuilt wheel; ignore the <1.3.0 warning)
+python -m pip install lru-dict==1.3.0
+
+# 3. Solana + formatting
+python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
+
+# 4. web3 runtime deps
+python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" \
+    "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" \
+    "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" \
+    aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" \
+    typing-extensions "toolz>=0.11.2,<0.12.0"
 ```
 
 Verify:
@@ -809,13 +863,13 @@ python -m pip install --no-deps web3==6.20.3
 python -m pip install lru-dict==1.3.0
 
 # 3. Solana + formatting
-python -m pip install solana==0.34.3 solders==0.21.0 anchorpy==0.20.1 tabulate==0.9.0
+python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
 
 # 4. web3 runtime deps (version-pinned for anchorpy/solana compat)
 python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" ^
     "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" ^
     "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" ^
-    aiohttp requests pyunormalize rlp "websockets>=10.0,<11.0" ^
+    aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" ^
     typing-extensions "toolz>=0.11.2,<0.12.0"
 ```
 
@@ -1262,9 +1316,9 @@ Chart components share constants from `dashboard/lib/chart-constants.ts`:
 | Python                  | 3.12 (native)   | Benchmark harness (benchmarks/)                        |
 | web3.py                 | 6.20.3          | Python EVM interaction                                 |
 | lru-dict                | 1.3.0           | web3 cache (1.3.0 forced — 1.2.x has no Windows wheel) |
-| solana-py               | 0.34.3          | Python Solana RPC client                               |
-| solders                 | 0.21.0          | Python Solana types (Rust extension)                   |
-| anchorpy                | 0.20.1          | Python Anchor IDL client                               |
+| solana-py               | 0.36.6          | Python Solana RPC client                               |
+| solders                 | 0.26.0          | Python Solana types (Rust extension)                   |
+| anchorpy                | 0.21.0          | Python Anchor IDL client                               |
 | tabulate                | 0.9.0           | Benchmark table formatting                             |
 | Next.js                 | 14.2.x          | Dashboard web application                              |
 | React                   | 18.x            | Dashboard UI                                           |

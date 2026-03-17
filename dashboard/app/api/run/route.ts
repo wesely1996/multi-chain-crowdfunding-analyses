@@ -67,14 +67,27 @@ export async function POST(req: NextRequest) {
     ? platform === "solana" ? "ts-solana" : "ts"
     : client;
 
-  const scriptArg = kind === "throughput" ? "--throughput" : "--lifecycle";
+  // Select script and args based on client type:
+  //   python -> benchmarks/run_tests.py (direct Python harness)
+  //   ts/dotnet -> benchmarks/run_client_benchmark.py or run_throughput_client.py (subprocess)
+  const script =
+    client === "python"
+      ? "benchmarks/run_tests.py"
+      : kind === "throughput"
+      ? "benchmarks/run_throughput_client.py"
+      : "benchmarks/run_client_benchmark.py";
+
+  const args =
+    client === "python"
+      ? ["--platform", platform, kind === "throughput" ? "--throughput" : "--lifecycle"]
+      : ["--platform", platform, "--client", clientLabel, "--variant", variant, "--env", env];
 
   const id = randomUUID();
   createRun(id);
 
   const child = spawn(
     "python",
-    ["benchmarks/run_tests.py", "--platform", platform, scriptArg],
+    [script, ...args],
     {
       cwd: REPO_ROOT,
       env: {

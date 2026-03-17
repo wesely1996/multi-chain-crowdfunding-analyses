@@ -357,7 +357,7 @@ describe("crowdfunding", () => {
         ID_SHORT_SUCCESS,
         new anchor.BN(100_000_000),
         new anchor.BN(500_000_000),
-        new anchor.BN(onChainNow + 4), // 4-second deadline
+        new anchor.BN(onChainNow + 10), // 10-second deadline (V4 txs are ~3× slower after V5 suite)
         Buffer.from([100])      // single milestone — full sweep
       )
       .accounts({
@@ -410,8 +410,8 @@ describe("crowdfunding", () => {
       .signers([contributor])
       .rpc();
 
-    // Wait for deadline.
-    await sleep(6000);
+    // Poll until on-chain clock passes the deadline — independent of wall-clock skew.
+    { let t = 0; while (t <= onChainNow + 10) { await sleep(500); const s = await connection.getSlot(); t = (await connection.getBlockTime(s)) ?? t; } }
 
     await program.methods
       .finalize()
@@ -440,7 +440,7 @@ describe("crowdfunding", () => {
         ID_FAIL,
         new anchor.BN(100_000_000),
         new anchor.BN(500_000_000),
-        new anchor.BN(onChainNow + 4), // 4-second deadline
+        new anchor.BN(onChainNow + 10), // 10-second deadline (matches test-5 robustness fix)
         Buffer.from([100])
       )
       .accounts({
@@ -493,8 +493,8 @@ describe("crowdfunding", () => {
       .signers([contributor])
       .rpc();
 
-    // Wait for deadline.
-    await sleep(6000);
+    // Poll until on-chain clock passes the deadline.
+    { let t = 0; while (t <= onChainNow + 10) { await sleep(500); const s = await connection.getSlot(); t = (await connection.getBlockTime(s)) ?? t; } }
 
     await program.methods
       .finalize()

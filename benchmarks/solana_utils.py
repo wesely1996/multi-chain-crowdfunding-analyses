@@ -1,34 +1,39 @@
 """
-solana_utils.py — Shared Solana helpers for the benchmark harness.
+solana_utils.py -- Thin re-export shim for backward compatibility.
 
-Imported by run_tests.py and throughput_test.py.
+All client logic has been moved to clients/python/solana/client.py.
+This file re-exports the public API so existing benchmark scripts
+(run_tests.py, throughput_test.py) continue to work without changes
+to their internal import paths.
+
+make_op_record() remains here because it is a benchmark-specific
+concern (schema-v2 result record construction), not a client concern.
 """
 
-from __future__ import annotations
-from typing import Any
-import time
+import sys
+import pathlib
 
+# Allow imports from repo root so `clients.python` resolves
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-async def airdrop_and_wait(client, pubkey, lamports: int, sleep_s: float = 2.0) -> None:
-    """Request airdrop and wait for confirmation."""
-    await client.request_airdrop(pubkey, lamports)
-    import asyncio; await asyncio.sleep(sleep_s)
-
-
-def find_pda(seeds: list[bytes], program_id) -> Any:
-    """Thin wrapper around Pubkey.find_program_address."""
-    from solders.pubkey import Pubkey
-    addr, _ = Pubkey.find_program_address(seeds, program_id)
-    return addr
-
-
-def ms() -> int:
-    return int(time.time() * 1000)
+from clients.python.shared.output import ms  # noqa: E402, F401
+from clients.python.solana.client import (  # noqa: E402, F401
+    find_pda,
+    airdrop_and_wait,
+    send_and_confirm,
+    get_fee,
+    get_client,
+    load_keypair,
+)
 
 
 def make_op_record(name: str, sig: str, fee: int, latency: int,
                    scenario: str, variant: str, client: str, env: str) -> dict:
-    """Build a schema-v2 operation record from a Solana transaction."""
+    """Build a schema-v2 operation record from a Solana transaction.
+
+    This is a benchmark concern (result schema construction), not a client
+    concern, so it stays in the benchmark layer.
+    """
     return {
         "operation": name,
         "fee_lamports": fee,

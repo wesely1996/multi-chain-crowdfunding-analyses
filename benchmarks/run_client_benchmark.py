@@ -50,9 +50,27 @@ import time
 
 # Allow running from repo root
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# Also add repo root so `clients.python` resolves
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import config
 
 SCHEMA_VERSION = "2"
+
+
+def _evm_account_from_index(index: int, seed: bytes | None = None):
+    """Derive Hardhat HD account at BIP-44 index. Pass pre-computed seed to avoid
+    repeated PBKDF2 calls when deriving multiple accounts."""
+    from eth_account import Account as _Acct
+    from eth_account.hdaccount import key_from_seed, seed_from_mnemonic as _sfm
+    _Acct.enable_unaudited_hdwallet_features()
+    if seed is None:
+        seed = _sfm(config.EVM_MNEMONIC, "")
+    return _Acct.from_key(key_from_seed(seed, f"m/44'/60'/0'/0/{index}")), seed
+
+
+def _evm_seed():
+    from eth_account.hdaccount import seed_from_mnemonic as _sfm
+    return _sfm(config.EVM_MNEMONIC, "")
 
 # ---------------------------------------------------------------------------
 # Subprocess runner helpers
@@ -116,6 +134,13 @@ def _run_dotnet(operation: str, extra_args: list[str], env: dict, dotnet_dir: st
     return _run_subprocess(cmd, env, dotnet_dir)
 
 
+def _run_python(operation: str, extra_args: list[str], env: dict, solana: bool = False) -> tuple[dict, int]:
+    """Run a Python client command and return (TxOutput, process_elapsed_ms)."""
+    cmd_op = f"sol:{operation}" if solana else f"evm:{operation}"
+    cmd = [sys.executable, "-m", "clients.python", cmd_op, *extra_args]
+    return _run_subprocess(cmd, env, str(config.REPO_ROOT))
+
+
 # ---------------------------------------------------------------------------
 # EVM benchmarks
 # ---------------------------------------------------------------------------
@@ -136,11 +161,11 @@ def _evm_setup_mint_tokens(deploy_json: dict) -> None:
     w3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
     raw_pk = os.getenv("EVM_PRIVATE_KEY", "")
+    _hd_seed = None
     if raw_pk:
         deployer = Account.from_key(raw_pk)
     else:
-        Account.enable_unaudited_hdwallet_features()
-        deployer = Account.from_mnemonic(config.EVM_MNEMONIC, account_path="m/44'/60'/0'/0/0")
+        deployer, _hd_seed = _evm_account_from_index(0)
 
     variant = deploy_json["variant"]
     _, _, mock_erc20_artifact = config.EVM_VARIANT_ARTIFACTS[variant]
@@ -158,8 +183,9 @@ def _evm_setup_mint_tokens(deploy_json: dict) -> None:
 
     n_total = config.N_CONTRIBUTIONS + 5  # success contributors + refund contributors
     print(f"[evm_setup] Minting tokens to {n_total} contributor accounts...")
+    _setup_seed = _evm_seed()
     for i in range(1, n_total + 1):
-        acc = Account.from_mnemonic(config.EVM_MNEMONIC, account_path=f"m/44'/60'/0'/0/{i}")
+        acc, _ = _evm_account_from_index(i, _setup_seed)
         _send(usdc.functions.mint(acc.address, config.CONTRIB_AMOUNT * 2).build_transaction({
             "from": deployer.address,
         }), deployer)
@@ -171,13 +197,8 @@ def _evm_setup_mint_tokens(deploy_json: dict) -> None:
 
 def _derive_evm_contributor_key(index: int) -> str:
     """Derive Hardhat account private key at index (1-based)."""
-    try:
-        from eth_account import Account
-        Account.enable_unaudited_hdwallet_features()
-        acc = Account.from_mnemonic(config.EVM_MNEMONIC, account_path=f"m/44'/60'/0'/0/{index}")
-        return acc.key.hex()
-    except ImportError as exc:
-        sys.exit(f"Missing dependency: {exc}")
+    acc, _ = _evm_account_from_index(index)
+    return acc.key.hex()
 
 
 def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dict) -> dict:
@@ -187,9 +208,12 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
     ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-evm")
+    use_python = client == "python"
 
     def _client_run(operation: str, extra_args: list[str], env: dict) -> tuple[dict, int]:
-        if use_ts:
+        if use_python:
+            return _run_python(operation, extra_args, env, solana=False)
+        elif use_ts:
             return _run_ts(operation, extra_args, env, ts_dir, solana=False)
         else:
             return _run_dotnet(operation, extra_args, env, dotnet_dir, solana=False)
@@ -299,8 +323,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
         w3 = Web3(Web3.HTTPProvider(config.EVM_RPC_URL))
         w3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
-        Account.enable_unaudited_hdwallet_features()
-        deployer = Account.from_mnemonic(config.EVM_MNEMONIC, account_path="m/44'/60'/0'/0/0")
+        deployer, _refund_seed = _evm_account_from_index(0)
         _, _, mock_erc20_artifact = config.EVM_VARIANT_ARTIFACTS[variant]
         factory_artifact, _, _ = config.EVM_VARIANT_ARTIFACTS[variant]
 
@@ -365,7 +388,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
         campaign_ref = w3.eth.contract(address=refund_campaign_addr, abi=campaign_abi_data)
 
         for i in range(1, n_refund + 1):
-            acc = Account.from_mnemonic(config.EVM_MNEMONIC, account_path=f"m/44'/60'/0'/0/{i}")
+            acc, _ = _evm_account_from_index(i, _refund_seed)
             # Approve
             approve_tx = usdc.functions.approve(refund_campaign_addr, config.CONTRIB_AMOUNT).build_transaction({
                 "from": acc.address,
@@ -430,7 +453,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
     except Exception:
         chain_id = deploy_json.get("chain_id")
 
-    client_label = "ts" if use_ts else "dotnet"
+    client_label = "python" if use_python else ("ts" if use_ts else "dotnet")
     result = {
         "schema_version": SCHEMA_VERSION,
         "variant": variant,
@@ -443,7 +466,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
         "timestamp_utc": int(time.time()),
         "limitations": [
             "Hardhat automines instantly; latency reflects local execution time only, not network propagation.",
-            "process_elapsed_ms includes subprocess startup overhead (tsx/dotnet runtime init).",
+            "process_elapsed_ms includes subprocess startup overhead (tsx/dotnet/python runtime init).",
             f"ts-evm contribute.ts bundles approve+contribute gas; cost = contributeGasUsed only.",
         ] if "localnet" in env_name else [
             "Sepolia: 12-second average block time; latency includes real network propagation.",
@@ -493,9 +516,12 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
     ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-solana")
+    use_python = client == "python"
 
     def _client_run_sync(operation: str, extra_args: list[str], env: dict) -> tuple[dict, int]:
-        if use_ts:
+        if use_python:
+            return _run_python(operation, extra_args, env, solana=True)
+        elif use_ts:
             return _run_ts(operation, extra_args, env, ts_dir, solana=True)
         else:
             return _run_dotnet(operation, extra_args, env, dotnet_dir, solana=True)
@@ -812,7 +838,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         total_ms = sum(contrib_latencies)
         tps = round(len(contrib_latencies) / (total_ms / 1000), 4) if total_ms > 0 else 0.0
 
-        client_label = "ts" if use_ts else "dotnet"
+        client_label = "python" if use_python else ("ts" if use_ts else "dotnet")
         return {
             "schema_version": SCHEMA_VERSION,
             "variant": variant,
@@ -848,8 +874,8 @@ def main() -> None:
         description="Lifecycle benchmark via subprocess-driven TS or .NET clients."
     )
     parser.add_argument("--platform", choices=["evm", "solana"], required=True)
-    parser.add_argument("--client", choices=["ts", "dotnet"], required=True,
-                        help="Client library: ts (viem/Anchor TS) or dotnet (Nethereum/Solnet)")
+    parser.add_argument("--client", choices=["ts", "dotnet", "python"], required=True,
+                        help="Client library: ts (viem/Anchor TS), dotnet (Nethereum/Solnet), or python (web3.py/anchorpy)")
     parser.add_argument("--variant", default=config.VARIANT,
                         help="Contract variant (default: $VARIANT or V1)")
     parser.add_argument("--env", default=None,

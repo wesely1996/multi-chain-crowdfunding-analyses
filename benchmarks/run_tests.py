@@ -50,7 +50,13 @@ import sys
 from typing import Any
 
 import config
-from evm_utils import ms as _ms
+
+# Ensure repo root is on sys.path for clients.python imports
+_repo_root = str(pathlib.Path(__file__).resolve().parent.parent)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+from clients.python.shared.output import ms as _ms  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Schema version tag embedded in every result file
@@ -113,9 +119,12 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
     # Python harness shares accounts with the TS benchmark without a separate
     # funding step.
     Account.enable_unaudited_hdwallet_features()
-    deployer_acc   = Account.from_mnemonic(config.EVM_MNEMONIC, account_path=f"m/44'/60'/0'/0/0")
+    # Derive seed once (single PBKDF2 call) then use key_from_seed per path — ~50× faster
+    from eth_account.hdaccount import key_from_seed, seed_from_mnemonic as _seed_from_mnemonic
+    _seed = _seed_from_mnemonic(config.EVM_MNEMONIC, "")
+    deployer_acc   = Account.from_key(key_from_seed(_seed, "m/44'/60'/0'/0/0"))
     contributor_accs = [
-        Account.from_mnemonic(config.EVM_MNEMONIC, account_path=f"m/44'/60'/0'/0/{i}")
+        Account.from_key(key_from_seed(_seed, f"m/44'/60'/0'/0/{i}"))
         for i in range(1, config.N_CONTRIBUTIONS + 1)
     ]
 

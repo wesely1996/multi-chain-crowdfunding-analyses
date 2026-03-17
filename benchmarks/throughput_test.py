@@ -50,7 +50,13 @@ import pathlib
 import sys
 
 import config
-from evm_utils import ms as _ms
+
+# Ensure repo root is on sys.path for clients.python imports
+_repo_root = str(pathlib.Path(__file__).resolve().parent.parent)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+from clients.python.shared.output import ms as _ms  # noqa: E402
 
 SCHEMA_VERSION = "2"
 
@@ -85,9 +91,11 @@ def throughput_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -
         sys.exit(f"[evm] Cannot connect to {config.EVM_RPC_URL}")
 
     Account.enable_unaudited_hdwallet_features()
-    deployer    = Account.from_mnemonic(config.EVM_MNEMONIC, account_path="m/44'/60'/0'/0/0")
+    from eth_account.hdaccount import key_from_seed, seed_from_mnemonic as _seed_from_mnemonic
+    _seed = _seed_from_mnemonic(config.EVM_MNEMONIC, "")
+    deployer    = Account.from_key(key_from_seed(_seed, "m/44'/60'/0'/0/0"))
     contributors = [
-        Account.from_mnemonic(config.EVM_MNEMONIC, account_path=f"m/44'/60'/0'/0/{i}")
+        Account.from_key(key_from_seed(_seed, f"m/44'/60'/0'/0/{i}"))
         for i in range(1, config.N_CONTRIBUTIONS + 1)
     ]
 

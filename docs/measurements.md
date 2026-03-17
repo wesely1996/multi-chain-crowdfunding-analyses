@@ -500,11 +500,14 @@ platform comparison.
 | **Test LOC** | 475 TypeScript — 3 files (`CrowdfundingCampaign.test.ts` 301, `CrowdfundingFactory.test.ts` 76, `fixtures.ts` 98) | 642 TypeScript — 1 file (`crowdfunding.ts`) |
 | **TypeScript client LOC** | 521 — 6 files (EVM-side operations) | 597 — 8 files (Solana-side operations, incl. `pda.ts` 35) |
 | **C# client LOC** | 350 — `EvmCampaignService.cs` | 551 — `SolanaCampaignService.cs` 300 + `InstructionBuilder.cs` 145 + `TransactionHelper.cs` 56 + `PdaHelper.cs` 50 |
+| **Python client LOC** | 803 — 10 files (EVM: `client.py` 84, `config.py` 82, `deploy.py` 189, `create_campaign.py` 105, `contribute.py` 109, `finalize.py` 63, `withdraw.py` 63, `refund.py` 72, `status.py` 92; shared: `output.py` 75) | 770 — 9 files (Solana: `client.py` 73, `config.py` 76, `idl_convert.py` 237, `create_campaign.py` 134, `contribute.py` 123, `finalize.py` 86, `withdraw.py` 104, `refund.py` 113, `status.py` 77) |
 | **Framework / toolchain** | Solidity 0.8.20 + Hardhat 2.28 + OpenZeppelin 5.1 + viem 2.21 | Rust 1.84 + Anchor 0.32 + SPL Token 0.3.11 + @solana/web3.js 1.95 |
 | **Setup steps to first tx** | **3** — `npm install` → `npx hardhat compile` → `npx hardhat run scripts/deploy.ts` | **10** — prereqs → Rust → Solana CLI → AVM → Anchor → Node.js (nvm) → keypair → `npm install` → `anchor build` → `solana-test-validator` + `anchor deploy` |
+| **Python client setup steps** | **4** — create venv → staged pip install (3 commands) → set env vars → `python -m clients.python evm:status` | **5** — same venv setup → set `SOLANA_*` env vars → `python -m clients.python sol:status` |
 | **Type safety model** | ABI-driven: Solidity enforces types on-chain; viem generates TypeScript types from ABI; Nethereum uses ABI-generated C# classes | IDL-driven: Anchor generates `idl.json`; `@coral-xyz/anchor` provides TS types; Solnet requires manual account struct mapping in C# |
+| **Python type safety** | web3.py uses ABI JSON at runtime; no compile-time type guarantees; `TxOutput` dataclass enforces output contract | anchorpy deserialises IDL at runtime; `Program` object provides method names but not typed args; account structs are dicts |
 | **Boilerplate burden** | Low — contract is self-contained; clients require ABI + address only; ERC-20 allowance is the only extra step | High — every instruction requires an explicit account list (≥ 8 accounts for `contribute`); PDA derivation must be reproduced in every client; ATA pre-creation required before first contribute |
-| **Key pain points** | Cold/warm SSTORE spread on first contribute (+51 k gas); ERC-20 approve-then-contribute two-step per contributor | Account enumeration per instruction; ATA pre-creation overhead; receipt-mint PDA seed must be consistent across program, TS, and C# clients |
+| **Key pain points** | Cold/warm SSTORE spread on first contribute (+51 k gas); ERC-20 approve-then-contribute two-step per contributor | Account enumeration per instruction; ATA pre-creation overhead; receipt-mint PDA seed must be consistent across program, TS, C#, and Python clients |
 
 ---
 

@@ -1,0 +1,37 @@
+# Python client dependencies
+# Tested on Python 3.12 (Windows native: py -3.12 | WSL: python3)
+#
+# IMPORTANT: Do NOT use `pip install -r requirements.txt` directly -- lru-dict
+# 1.2.x has no prebuilt wheel on Windows. Use the install procedure below or
+# see docs/setup.md for the full walkthrough.
+#
+# Install procedure (from repo root -- PowerShell or WSL bash):
+#   # Windows: py -3.12 -m venv .venv && .\.venv\Scripts\Activate.ps1
+#   # WSL:     python3 -m venv .venv && source .venv/bin/activate
+#   python -m pip install --upgrade pip
+#   python -m pip install --no-deps web3==6.20.3
+#   python -m pip install lru-dict==1.3.0
+#   python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
+#   python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" typing-extensions "toolz>=0.11.2,<0.12.0"
+
+# -- Top-level packages --
+
+# EVM interaction
+web3==6.20.3
+lru-dict==1.3.0           # web3 pins <1.3.0 but 1.3.0 is API-identical and has Windows wheels
+
+# Solana interaction
+solana==0.36.6            # anchorpy 0.21.0 requires >=0.36.1
+solders==0.26.0           # solana 0.36.6 requires >=0.23,<0.27
+anchorpy==0.21.0          # pinned with solana/solders; use a Python-validated IDL
+
+# Output formatting
+tabulate==0.9.0
+
+# -- Version overrides (anchorpy/solana compat) --
+websockets>=10.0,<16.0    # anchorpy/solana compat; <16.0 avoids breaking API changes
+toolz>=0.11.2,<0.12.0     # anchorpy <0.12.0
+
+# -- Known warnings (safe to ignore) --
+# pywin32>=223   -- web3 wants this for Windows IPC transport; not needed for HTTP JSON-RPC
+# lru-dict<1.3.0 -- pip warns about 1.3.0 but it works identically to 1.2.x

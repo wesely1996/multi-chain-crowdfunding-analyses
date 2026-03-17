@@ -130,39 +130,46 @@ Runtime mutable fields:
 
 ## 4a. Client Layer Architecture
 
-The thesis includes two integration client layers — TypeScript and .NET — that interact with all
-implemented contract variants at each stage. Client support is stage-aware: it grows as new
-variants are implemented. A client's inability to reach a variant at a given stage is a temporary
-implementation-stage limitation, not the intended final design.
+The thesis includes three integration client layers — TypeScript, .NET, and Python — that
+interact with all implemented contract variants at each stage. Client support is stage-aware:
+it grows as new variants are implemented. A client's inability to reach a variant at a given
+stage is a temporary implementation-stage limitation, not the intended final design.
 
 ### 4a.1 Stage-Aware Coverage
 
-| Stage | TypeScript client | .NET client |
-|-------|-----------------|-------------|
-| MVP (V1 ERC-20 + V4 SPL) | viem — EVM ERC-20; Anchor TS + @solana/web3.js — Solana SPL | Nethereum — EVM ERC-20; Solana.NET / JSON-RPC — Solana SPL |
-| Full thesis scope (V1–V5) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana (V5) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana (V5) |
+| Stage | TypeScript client | .NET client | Python client |
+|-------|-----------------|-------------|---------------|
+| MVP (V1 ERC-20 + V4 SPL) | viem — EVM ERC-20; Anchor TS + @solana/web3.js — Solana SPL | Nethereum — EVM ERC-20; Solana.NET / JSON-RPC — Solana SPL | web3.py — EVM ERC-20; anchorpy — Solana SPL |
+| Full thesis scope (V1–V5) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana (V5) | Extended adapter per EVM variant (ERC-4626, ERC-1155) + Token-2022 Solana (V5) | V1/V2/V3 branching in `evm/contribute.py`; V4/V5 branching in `solana/contribute.py` |
 
-> **Design intent**: Both client layers — TypeScript and .NET — are intended to support every
-> variant that exists at the current implementation stage. In the MVP this means both clients
-> cover the two baseline implementations only (EVM ERC-20 and Solana SPL). In the full thesis
-> scope both clients are extended to cover all five variants. The current repository layout
-> (`clients/ts-evm/` and `clients/dotnet/`) reflects the MVP stage and will evolve.
+> **Design intent**: All three client layers are intended to support every variant that exists
+> at the current implementation stage. The current repository layout (`clients/ts/`,
+> `clients/dotnet/`, `clients/python/`) covers all five variants; V2/V3/V5 branching in the
+> TypeScript and .NET layers is partially implemented and complete in Python.
+
+> **Python client as library**: `clients/python/` doubles as a library imported directly by
+> `benchmarks/run_tests.py` and `benchmarks/throughput_test.py`. The benchmark orchestration
+> imports `clients.python.evm.client` and `clients.python.solana.client` for in-process
+> measurement. It can also be driven as a subprocess via `run_client_benchmark.py --client python`.
 
 ### 4a.2 Canonical Client Operations
 
-Both client layers expose the same five canonical operations regardless of chain or variant.
-The underlying transport (viem, Anchor TS, Nethereum, Solana.NET) is selected per variant.
+All three client layers expose the same five canonical operations regardless of chain or variant.
+The underlying transport (viem, Anchor TS, Nethereum, Solana.NET, web3.py, anchorpy) is
+selected per variant.
 
-| Operation | TypeScript | .NET |
-|-----------|-----------|------|
-| Create campaign | `createCampaign(params)` | `CampaignService.CreateCampaign(params)` |
-| Contribute | `contribute(amount)` | `CampaignService.Contribute(amount)` |
-| Finalize | `finalize()` | `CampaignService.Finalize()` |
-| Withdraw milestone | `withdrawMilestone()` | `CampaignService.WithdrawMilestone()` |
-| Refund | `refund()` | `CampaignService.Refund()` |
+| Operation | TypeScript | .NET | Python |
+|-----------|-----------|------|--------|
+| Create campaign | `createCampaign(params)` | `CampaignService.CreateCampaign(params)` | `python -m clients.python evm:create_campaign` |
+| Contribute | `contribute(amount)` | `CampaignService.Contribute(amount)` | `python -m clients.python evm:contribute --amount N` |
+| Finalize | `finalize()` | `CampaignService.Finalize()` | `python -m clients.python evm:finalize` |
+| Withdraw milestone | `withdrawMilestone()` | `CampaignService.WithdrawMilestone()` | `python -m clients.python evm:withdraw` |
+| Refund | `refund()` | `CampaignService.Refund()` | `python -m clients.python evm:refund` |
+
+Prefix `sol:` instead of `evm:` for Solana operations (e.g. `python -m clients.python sol:contribute --amount N`).
 
 This uniform operation surface is the basis for the integration complexity metric in the
-Developer Experience evaluation. It also means that benchmarking scripts can drive either
+Developer Experience evaluation. It also means that benchmarking scripts can drive any
 client layer against either chain without changing the operation names.
 
 ---

@@ -42,10 +42,13 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# Also add repo root so `clients.python` resolves
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import config
 from run_client_benchmark import (
     _run_ts,
     _run_dotnet,
+    _run_python,
     _evm_setup_mint_tokens,
     _derive_evm_contributor_key,
 )
@@ -62,9 +65,12 @@ def throughput_evm_client(client: str, variant: str, env_name: str, deploy_json:
     ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-evm")
+    use_python = client == "python"
 
     def _client_run(operation: str, extra_args: list[str], env: dict) -> tuple[dict, int]:
-        if use_ts:
+        if use_python:
+            return _run_python(operation, extra_args, env, solana=False)
+        elif use_ts:
             return _run_ts(operation, extra_args, env, ts_dir, solana=False)
         else:
             return _run_dotnet(operation, extra_args, env, dotnet_dir, solana=False)
@@ -122,7 +128,7 @@ def throughput_evm_client(client: str, variant: str, env_name: str, deploy_json:
     except Exception:
         chain_id = deploy_json.get("chain_id")
 
-    client_label = "ts" if use_ts else "dotnet"
+    client_label = "python" if use_python else ("ts" if use_ts else "dotnet")
     result = {
         "schema_version": SCHEMA_VERSION,
         "variant": variant,
@@ -205,9 +211,12 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
     ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
     use_ts = client in ("ts", "ts-solana")
+    use_python = client == "python"
 
     def _client_run_sync(operation: str, extra_args: list[str], env: dict) -> tuple[dict, int]:
-        if use_ts:
+        if use_python:
+            return _run_python(operation, extra_args, env, solana=True)
+        elif use_ts:
             return _run_ts(operation, extra_args, env, ts_dir, solana=True)
         else:
             return _run_dotnet(operation, extra_args, env, dotnet_dir, solana=True)
@@ -331,7 +340,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
         latencies = [r["latency_ms"] for r in per_tx_records if r["latency_ms"] is not None]
         proc_times = [r["process_elapsed_ms"] for r in per_tx_records]
 
-        client_label = "ts" if use_ts else "dotnet"
+        client_label = "python" if use_python else ("ts" if use_ts else "dotnet")
         return {
             "schema_version": SCHEMA_VERSION,
             "variant": variant,
@@ -393,7 +402,7 @@ def main() -> None:
         description="Isolated throughput benchmark via subprocess-driven TS or .NET clients."
     )
     parser.add_argument("--platform", choices=["evm", "solana"], required=True)
-    parser.add_argument("--client", choices=["ts", "dotnet"], required=True)
+    parser.add_argument("--client", choices=["ts", "dotnet", "python"], required=True)
     parser.add_argument("--variant", default=config.VARIANT)
     parser.add_argument("--env", default=None)
     parser.add_argument("--deploy-json", default=None,

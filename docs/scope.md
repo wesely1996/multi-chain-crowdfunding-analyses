@@ -80,21 +80,23 @@ the controlled baseline, which are planned extensions, and what is intentionally
 
 ## 4a. Client Layer Scope
 
-The two integration client layers — TypeScript and .NET — evolve in parallel with the contract
-variants. Excluding a variant from MVP benchmarks does not exclude it from the final client
-abstraction goals. The benchmark scope and the client architecture scope are distinct.
+The three integration client layers — TypeScript, .NET, and Python — evolve in parallel with the
+contract variants. Excluding a variant from MVP benchmarks does not exclude it from the final
+client abstraction goals. The benchmark scope and the client architecture scope are distinct.
 
-| Stage | TypeScript client | .NET client | Variants supported |
-|-------|------------------|-------------|-------------------|
-| MVP | viem (EVM ERC-20) + Anchor TS (Solana SPL) | Nethereum (EVM ERC-20) + Solana.NET/RPC (Solana SPL) | V1 + V4 (SPL only) |
-| Full thesis scope | Extended to ERC-4626, ERC-1155, and Token-2022 variants | Extended to ERC-4626, ERC-1155, and Token-2022 variants | V1 + V2 + V3 + V4 + V5 |
+| Stage | TypeScript client | .NET client | Python client | Variants supported |
+|-------|------------------|-------------|---------------|-------------------|
+| MVP | viem (EVM ERC-20) + Anchor TS (Solana SPL) | Nethereum (EVM ERC-20) + Solana.NET/RPC (Solana SPL) | web3.py (EVM ERC-20) + anchorpy (Solana SPL) | V1 + V4 (SPL only) |
+| Full thesis scope | Extended to ERC-4626, ERC-1155, and Token-2022 variants | Extended to ERC-4626, ERC-1155, and Token-2022 variants | V1/V2/V3 branching in `evm/contribute.py`; V4/V5 in `solana/contribute.py` | V1 + V2 + V3 + V4 + V5 |
 
-`[recommendation]` Both client layers are designed from the start to be variant-aware. A client's
-absence of support for a planned variant at MVP stage is a temporary implementation-stage
+`[recommendation]` All three client layers are designed from the start to be variant-aware. A
+client's absence of support for a planned variant at MVP stage is a temporary implementation-stage
 limitation, not the intended final design.
 
-`[fact]` The repository structure is staged: `clients/ts-evm/` and `clients/dotnet/` reflect
-the MVP layout and will evolve as additional variants are implemented.
+`[fact]` The repository layout is `clients/ts/`, `clients/dotnet/`, and `clients/python/`.
+The Python client doubles as a library: `benchmarks/run_tests.py` and `benchmarks/throughput_test.py`
+import from `clients.python.*` directly for in-process measurement. It can also be driven as a
+subprocess via `python benchmarks/run_client_benchmark.py --client python`.
 
 ---
 
@@ -153,6 +155,11 @@ Any deviation from these versions must be documented in `docs/measurements.md`.
 | `@coral-xyz/anchor` (TS) | 0.30.1 | TS client Anchor SDK |
 | `@solana/web3.js` | 1.95.4 | Solana RPC and transaction building |
 | viem | 2.21.x | EVM client RPC and contract interaction |
+| Python | 3.12 (3.11–3.13 also work) | Benchmark harness + Python client (`clients/python/`) |
+| web3.py | 6.20.3 | Python EVM interaction |
+| solana-py | 0.36.6 | Python Solana RPC client |
+| solders | 0.26.0 | Python Solana types (Rust extension) |
+| anchorpy | 0.21.0 | Python Anchor IDL client |
 
 ### 7.2 Measurement Environments
 

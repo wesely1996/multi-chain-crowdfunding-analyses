@@ -38,9 +38,10 @@ Init → Funding (softCap, hardCap, deadline) → Finalize → Success (withdraw
 ```
 contracts/evm/        – Solidity contracts (V1/V2/V3) + Hardhat tests and deploy scripts
 contracts/solana/     – Anchor programs (V4 crowdfunding, V5 crowdfunding_token2022) + tests
+clients/python/       – Python + web3.py / anchorpy CLI client (EVM and Solana)
 clients/ts/           – TypeScript + viem / Anchor TS lifecycle scripts (EVM and Solana)
 clients/dotnet/       – C# + Nethereum / Solnet client
-benchmarks/           – Python + web3.py benchmark harness; results in benchmarks/results/
+benchmarks/           – Benchmark orchestration (imports clients/python/); results in benchmarks/results/
 dashboard/            – Next.js 14 web app for visualising and triggering benchmark runs
 docs/                 – Architecture, measurements, security, and scope documentation
 ```
@@ -49,9 +50,10 @@ docs/                 – Architecture, measurements, security, and scope docume
 
 | Client | Stack | Purpose |
 |--------|-------|---------|
+| `clients/python/` | Python + web3.py / anchorpy | Python CLI client (EVM and Solana lifecycle) |
 | `clients/ts/` | TypeScript + viem / Anchor TS | EVM and Solana lifecycle scripts |
 | `clients/dotnet/` | C# + Nethereum / Solnet | .NET integration layer |
-| `benchmarks/` | Python + web3.py / anchorpy | Automated benchmarking and metric collection |
+| `benchmarks/` | Python (imports `clients/python/`) | Benchmark orchestration and metric collection |
 | `dashboard/` | Next.js 14 + Recharts | Benchmark visualisation and live run triggering |
 
 ## Metrics
@@ -88,23 +90,37 @@ anchor build
 anchor test
 ```
 
+### Python Client
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r clients/python/requirements.txt
+
+# Standalone operations (from repo root)
+python -m clients.python evm:deploy --variant V1
+python -m clients.python evm:contribute --amount 10000000
+python -m clients.python sol:contribute --amount 10000000
+python -m clients.python evm:status
+```
+
 ### Python Benchmarks
 
 ```bash
-cd benchmarks
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
 # Start Hardhat node in a separate terminal: cd contracts/evm && npx hardhat node
-VARIANT=V1 python run_tests.py --platform evm
-VARIANT=V2 python run_tests.py --platform evm
-VARIANT=V3 python run_tests.py --platform evm
+VARIANT=V1 python benchmarks/run_tests.py --platform evm
+VARIANT=V2 python benchmarks/run_tests.py --platform evm
+VARIANT=V3 python benchmarks/run_tests.py --platform evm
 
 # Start solana-test-validator + anchor deploy first
-VARIANT=V4 python run_tests.py --platform solana
-VARIANT=V5 python run_tests.py --platform solana
+VARIANT=V4 python benchmarks/run_tests.py --platform solana
+VARIANT=V5 python benchmarks/run_tests.py --platform solana
 
-python collect_metrics.py      # print cross-variant comparison table
+# Subprocess-driven Python client benchmark
+python benchmarks/run_client_benchmark.py \
+    --platform evm --client python --variant V1 --env hardhat-localnet \
+    --deploy-json /tmp/evm_deploy.json
+
+python benchmarks/collect_metrics.py    # print cross-variant comparison table
 ```
 
 ### Dashboard
