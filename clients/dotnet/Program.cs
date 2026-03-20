@@ -5,7 +5,7 @@ using CrowdfundingClient.Helpers;
 using CrowdfundingClient.Models;
 using CrowdfundingClient.Services;
 
-DotEnv.Load();
+DotEnv.Load(options: new DotEnvOptions(envFilePaths: new[] { "../../.env" }));
 
 if (args.Length == 0)
 {

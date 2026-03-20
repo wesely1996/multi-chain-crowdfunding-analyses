@@ -8,7 +8,7 @@ use instructions::*;
 
 // WHY: placeholder ID — replaced by `anchor keys sync` after first build.
 // Run `anchor keys list` and update both this macro and Anchor.toml [programs.localnet].
-declare_id!("46xPA3ukhGDwk1w9ZZGCmkmVWuRR1nT9Z3QsPrDNxRyy");
+declare_id!("AtaYCBbNJJwwwckTouZ2G4ZgrzPNT2JtZF1yL7zUxQpC");
 
 #[program]
 pub mod crowdfunding_token2022 {

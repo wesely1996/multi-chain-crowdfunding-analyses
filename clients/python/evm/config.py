@@ -29,16 +29,16 @@ MNEMONIC: str = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
-# Contract addresses (set after deployment)
-# ---------------------------------------------------------------------------
-FACTORY_ADDRESS: str = os.getenv("FACTORY_ADDRESS", "")
-CAMPAIGN_ADDRESS: str = os.getenv("CAMPAIGN_ADDRESS", "")
-PAYMENT_TOKEN_ADDRESS: str = os.getenv("PAYMENT_TOKEN_ADDRESS", "")
-
-# ---------------------------------------------------------------------------
 # Variant selection
 # ---------------------------------------------------------------------------
 VARIANT: str = os.getenv("VARIANT", "V1")
+
+# ---------------------------------------------------------------------------
+# Contract addresses (set after deployment)
+# ---------------------------------------------------------------------------
+FACTORY_ADDRESS: str = os.getenv(f"FACTORY_ADDRESS_{VARIANT}", "")
+CAMPAIGN_ADDRESS: str = os.getenv(f"CAMPAIGN_ADDRESS_{VARIANT}", "")
+PAYMENT_TOKEN_ADDRESS: str = os.getenv("PAYMENT_TOKEN_ADDRESS", "")
 
 # ---------------------------------------------------------------------------
 # Hardhat artifact paths (per variant)

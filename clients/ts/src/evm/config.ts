@@ -1,4 +1,5 @@
-import "dotenv/config";
+import { config as _dotenvConfig } from "dotenv";
+_dotenvConfig({ path: "../../.env" });
 import {
   createPublicClient,
   createWalletClient,
@@ -23,9 +24,10 @@ import { requireEnv, DECIMALS } from "../shared/env.js";
 
 export const RPC_URL = requireEnv("RPC_URL");
 export const PRIVATE_KEY = requireEnv("PRIVATE_KEY") as `0x${string}`;
-export const FACTORY_ADDRESS = requireEnv("FACTORY_ADDRESS") as Address;
-export const CAMPAIGN_ADDRESS = requireEnv("CAMPAIGN_ADDRESS") as Address;
 export const PAYMENT_TOKEN_ADDRESS = requireEnv("PAYMENT_TOKEN_ADDRESS") as Address;
+export const VARIANT = process.env["VARIANT"] ?? "V1";
+export const FACTORY_ADDRESS = requireEnv(`FACTORY_ADDRESS_${VARIANT}`) as Address;
+export const CAMPAIGN_ADDRESS = requireEnv(`CAMPAIGN_ADDRESS_${VARIANT}`) as Address;
 
 export { DECIMALS };
 
@@ -54,8 +56,6 @@ export const walletClient = createWalletClient({
 });
 
 // ── Variant-aware ABI selection ──────────────────────────────────────────────
-
-export const VARIANT = process.env["VARIANT"] ?? "V1";
 
 const FACTORY_ABI_MAP: Record<string, unknown[]> = {
   V1: factoryAbi as unknown[],

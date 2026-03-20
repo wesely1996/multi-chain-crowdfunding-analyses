@@ -17,15 +17,19 @@ public record EvmConfig(
     long GasRefund         = 300_000
 )
 {
-    public static EvmConfig FromEnvironment() => new(
-        RpcUrl              : Env("RPC_URL", "http://127.0.0.1:8545"),
-        PrivateKey          : Env("PRIVATE_KEY"),
-        ChainId             : int.Parse(Env("CHAIN_ID", "31337")),
-        FactoryAddress      : Env("FACTORY_ADDRESS"),
-        CampaignAddress     : Env("CAMPAIGN_ADDRESS"),
-        PaymentTokenAddress : Env("PAYMENT_TOKEN_ADDRESS"),
-        Variant             : Env("VARIANT", "V1")
-    );
+    public static EvmConfig FromEnvironment()
+    {
+        var variant = Env("VARIANT", "V1");
+        return new(
+            RpcUrl              : Env("RPC_URL", "http://127.0.0.1:8545"),
+            PrivateKey          : Env("PRIVATE_KEY"),
+            ChainId             : int.Parse(Env("CHAIN_ID", "31337")),
+            FactoryAddress      : Env($"FACTORY_ADDRESS_{variant}"),
+            CampaignAddress     : Env($"CAMPAIGN_ADDRESS_{variant}"),
+            PaymentTokenAddress : Env("PAYMENT_TOKEN_ADDRESS"),
+            Variant             : variant
+        );
+    }
 
     private static string Env(string n, string d = "") =>
         Environment.GetEnvironmentVariable(n) ?? d;

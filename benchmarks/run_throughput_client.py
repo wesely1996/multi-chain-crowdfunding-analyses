@@ -78,8 +78,8 @@ def throughput_evm_client(client: str, variant: str, env_name: str, deploy_json:
     base_env = {
         **os.environ,
         "RPC_URL": config.EVM_RPC_URL,
-        "FACTORY_ADDRESS": deploy_json["factory"],
-        "CAMPAIGN_ADDRESS": deploy_json["campaign"],
+        f"FACTORY_ADDRESS_{variant}": deploy_json["factory"],
+        f"CAMPAIGN_ADDRESS_{variant}": deploy_json["campaign"],
         "PAYMENT_TOKEN_ADDRESS": deploy_json["mockERC20"],
         "CHAIN_ID": str(deploy_json.get("chain_id", 31337)),
     }
@@ -302,7 +302,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
         base_env = {
             **os.environ,
             "SOLANA_RPC_URL": config.SOLANA_RPC_URL,
-            "SOLANA_PROGRAM_ID": config.SOLANA_PROGRAM_ID,
+            f"SOLANA_PROGRAM_ID_{variant}": config.SOLANA_PROGRAM_ID,
             "SOLANA_PAYMENT_MINT": str(payment_mint.pubkey),
             "SOLANA_CAMPAIGN_ADDRESS": str(campaign_pda),
             "SOLANA_CAMPAIGN_ID": str(campaign_id_val),

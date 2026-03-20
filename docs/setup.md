@@ -6,14 +6,14 @@ Complete walk-through from a clean machine to viewing benchmark results in the d
 
 ### Prerequisites
 
-| Tool | Minimum version | Used for |
-|------|----------------|---------|
-| Node.js | 20.x LTS | EVM contracts, TypeScript clients, dashboard |
-| Python | 3.11+ | Benchmark harness |
-| Rust | 1.84+ | Solana program compilation |
-| Solana CLI | 3.x stable | Program deployment |
-| Anchor CLI | 0.32.1 | Solana build, test, deploy |
-| .NET SDK | 8.0 | .NET client (optional) |
+| Tool       | Minimum version | Used for                                     |
+| ---------- | --------------- | -------------------------------------------- |
+| Node.js    | 20.x LTS        | EVM contracts, TypeScript clients, dashboard |
+| Python     | 3.11+           | Benchmark harness                            |
+| Rust       | 1.84+           | Solana program compilation                   |
+| Solana CLI | 3.x stable      | Program deployment                           |
+| Anchor CLI | 0.32.1          | Solana build, test, deploy                   |
+| .NET SDK   | 8.0             | .NET client (optional)                       |
 
 ### Step 1 — EVM contracts
 
@@ -34,7 +34,7 @@ Deploy all three variants:
 
 ```bash
 npx hardhat run scripts/deploy.ts --network localhost
-# Note the printed MockERC20, Factory, and Campaign addresses for .env files
+# Note the printed MockERC20, Factory, and Campaign addresses for .env
 ```
 
 ### Step 2 — Solana programs
@@ -45,7 +45,7 @@ npx hardhat run scripts/deploy.ts --network localhost
 cd contracts/solana
 npm install
 anchor build        # compiles both crowdfunding (V4) and crowdfunding_token2022 (V5)
-anchor test         # 9 passing (~15 s)
+anchor test         # 18 passing (~60 s)
 ```
 
 Start a persistent validator (keep open in a separate terminal):
@@ -66,8 +66,18 @@ cd contracts/solana && anchor deploy
 # From repo root — create (or reuse) the shared venv
 cd benchmarks
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install -r ../clients/python/requirements.txt
+python -m pip install --upgrade pip
+
+# Install in stages — plain `pip install -r requirements.txt` will fail
+# because web3 pins lru-dict<1.3.0 but 1.2.x has no prebuilt Linux/Windows wheel.
+python -m pip install --no-deps web3==6.20.3
+python -m pip install lru-dict==1.3.0
+python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
+python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" \
+    "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" \
+    "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" \
+    aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" \
+    typing-extensions "toolz>=0.11.2,<0.12.0"
 
 # EVM lifecycle (Hardhat node must be running)
 VARIANT=V1 CLIENT=python python run_tests.py --platform evm
@@ -102,24 +112,117 @@ python benchmarks/run_throughput_client.py \
 ```bash
 cd clients/ts
 npm install
-cp .env.localnet .env
-# Edit .env — paste addresses from Step 1 deploy output and Anchor.toml program IDs
-
-# EVM lifecycle
-npm run create-campaign
-npm run contribute -- --amount 10000000
-npm run finalize && npm run withdraw
-npm run status
-
-# Solana lifecycle
-npm run sol:create-campaign -- --deadline-seconds 60
-npm run sol:contribute -- --amount 10000000
-# wait ~60 s
-npm run sol:finalize && npm run sol:withdraw
-npm run sol:status
+# Edit .env at repo root — paste addresses from Step 1 deploy output and Anchor.toml program IDs
 ```
 
-### Step 5 — Python client
+#### EVM lifecycle
+
+`--amount` takes **human-readable USDC** (e.g. `10` = 10 USDC); the client multiplies by 10⁶ internally. `--soft-cap` and `--hard-cap` use the same units.
+
+After each `create-campaign`, copy `data.campaignAddress` from the JSON output into `.env` as `CAMPAIGN_ADDRESS_{VARIANT}` before running any other command — otherwise `contribute`/`finalize`/`withdraw` will silently hit the stale address from the previous deployment.
+
+```bash
+# 1. Create campaign (soft-cap 10 USDC → one contribution is enough to succeed)
+VARIANT=V1 npm run create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-days 1
+# → copy data.campaignAddress from output → set CAMPAIGN_ADDRESS_V1=<address> in .env
+
+# 2. Contribute (10 USDC = at or above soft-cap → campaign will succeed)
+VARIANT=V1 npm run contribute -- --amount 10
+
+# 3. Advance time past deadline (bash/WSL — see PowerShell equivalent below)
+curl -s -X POST http://127.0.0.1:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"evm_increaseTime","params":[86401],"id":1}'
+curl -s -X POST http://127.0.0.1:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"evm_mine","params":[],"id":2}'
+
+# 4. Finalize → should report successful: true
+VARIANT=V1 npm run finalize
+
+# 5. Withdraw milestones (run 3× for [30,30,40] schedule)
+VARIANT=V1 npm run withdraw
+VARIANT=V1 npm run withdraw
+VARIANT=V1 npm run withdraw
+
+VARIANT=V1 npm run status
+```
+
+> **Refund path:** use a softCap above what you contribute (e.g. `--soft-cap 1000`), then after
+> finalize call `npm run refund` instead of `withdraw`.
+
+> **Other variants** — same steps, change `VARIANT`:
+>
+> ```bash
+> VARIANT=V2 npm run create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-days 1
+> VARIANT=V3 npm run create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-days 1
+> ```
+
+#### Solana lifecycle
+
+Select V4 (SPL Token) or V5 (Token-2022) by setting `VARIANT`. Run inside the
+WSL terminal (same environment as the running validator). Solana has no time-warp RPC — use a short `--deadline-seconds` instead.
+
+```bash
+# V4 — SPL Token (classic)
+VARIANT=V4 npm run sol:create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-seconds 15
+# → copy campaignAddress → set SOLANA_CAMPAIGN_ADDRESS in .env or pass --campaign <ADDRESS>
+VARIANT=V4 npm run sol:contribute -- --amount 10
+# wait 15 s for deadline to pass
+VARIANT=V4 npm run sol:finalize
+VARIANT=V4 npm run sol:withdraw
+VARIANT=V4 npm run sol:status
+
+# V5 — Token-2022 extensions (identical flow, different program)
+VARIANT=V5 npm run sol:create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-seconds 15
+VARIANT=V5 npm run sol:contribute -- --amount 10
+# wait 15 s
+VARIANT=V5 npm run sol:finalize
+VARIANT=V5 npm run sol:withdraw
+VARIANT=V5 npm run sol:status
+```
+
+### Step 5 — .NET client
+
+```bash
+cd clients/dotnet
+dotnet build
+# Edit .env at repo root — addresses from Step 1 deploy output and Anchor.toml program IDs
+```
+
+#### EVM lifecycle
+
+```bash
+VARIANT=V1 dotnet run -- create-campaign
+# → copy data.campaignAddress from output → set CAMPAIGN_ADDRESS_V1=<address> in .env
+VARIANT=V1 dotnet run -- contribute --amount 10
+VARIANT=V1 dotnet run -- finalize
+VARIANT=V1 dotnet run -- withdraw
+VARIANT=V1 dotnet run -- status
+```
+
+> **Other variants:** change `VARIANT` to `V2` or `V3`.
+
+#### Solana lifecycle (WSL only)
+
+```bash
+VARIANT=V4 dotnet run -- sol:create-campaign --deadline-seconds 15
+# → copy campaignAddress → pass --campaign <ADDRESS> or set SOLANA_CAMPAIGN_ADDRESS in .env
+VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+# wait 15 s for deadline to pass
+VARIANT=V4 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:withdraw --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:status
+
+# V5 — Token-2022 (identical flow)
+VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 15
+VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:withdraw --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:status
+```
+
+### Step 6 — Python client
 
 The Python client (`clients/python/`) is a proper CLI client that mirrors the TypeScript and .NET clients. It shares the venv created in Step 3.
 
@@ -127,23 +230,28 @@ The Python client (`clients/python/`) is a proper CLI client that mirrors the Ty
 # Activate the venv from Step 3 (if not already active)
 source benchmarks/.venv/bin/activate
 
-# EVM lifecycle (Hardhat node must be running; addresses from Step 1 deploy)
-FACTORY_ADDRESS=0x... CAMPAIGN_ADDRESS=0x... PAYMENT_TOKEN_ADDRESS=0x... \
-  python -m clients.python evm:status
+# Load the root .env first (bash/WSL):
+set -a; source .env; set +a
 
-FACTORY_ADDRESS=0x... CAMPAIGN_ADDRESS=0x... PAYMENT_TOKEN_ADDRESS=0x... \
-PRIVATE_KEY=0x... \
+# EVM lifecycle — set VARIANT to select V1/V2/V3
+VARIANT=V1 python -m clients.python evm:status
+VARIANT=V1 python -m clients.python evm:contribute --amount 10000000
+VARIANT=V2 python -m clients.python evm:contribute --amount 10000000
+VARIANT=V3 python -m clients.python evm:contribute --amount 10000000
+
+# Or override addresses per-command:
+FACTORY_ADDRESS_V1=0x... CAMPAIGN_ADDRESS_V1=0x... PAYMENT_TOKEN_ADDRESS=0x... \
+PRIVATE_KEY=0x... VARIANT=V1 \
   python -m clients.python evm:contribute --amount 10000000
 
-# Solana lifecycle (solana-test-validator + anchor deploy must be running)
-SOLANA_CAMPAIGN_ADDRESS=... SOLANA_PAYMENT_MINT=... \
-  python -m clients.python sol:contribute --amount 10000000
-
-SOLANA_CAMPAIGN_ADDRESS=... \
-  python -m clients.python sol:status
+# Solana lifecycle — set VARIANT to select V4/V5
+VARIANT=V4 python -m clients.python sol:contribute --amount 10000000
+VARIANT=V4 python -m clients.python sol:status
+VARIANT=V5 python -m clients.python sol:contribute --amount 10000000
+VARIANT=V5 python -m clients.python sol:status
 ```
 
-### Step 6 — Dashboard
+### Step 7 — Dashboard
 
 ```bash
 cd dashboard
@@ -169,14 +277,354 @@ VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
 
 ### Troubleshooting
 
-| Symptom | Fix |
-|---------|-----|
-| `Compiled 0 files` | Run from `contracts/evm/` where `hardhat.config.ts` lives |
-| `cannot connect to http://127.0.0.1:8545` | Start Hardhat node: `cd contracts/evm && npx hardhat node` |
-| Port 8899 already in use | `pkill -f solana-test-validator` |
-| `anchor: command not found` | Run `avm use 0.32.1` and check your PATH |
-| Dashboard shows no results | Result files must have `"schema_version": "2"`; start `npm run dev` from `dashboard/` |
-| V5 IDL not found | Run `anchor build` in `contracts/solana/` first |
+| Symptom                                                     | Fix                                                                                                                                                                                |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Compiled 0 files`                                          | Run from `contracts/evm/` where `hardhat.config.ts` lives                                                                                                                          |
+| `cannot connect to http://127.0.0.1:8545`                   | Start Hardhat node: `cd contracts/evm && npx hardhat node`                                                                                                                         |
+| Port 8899 already in use                                    | `pkill -f solana-test-validator`                                                                                                                                                   |
+| `anchor: command not found`                                 | Run `avm use 0.32.1` and check your PATH                                                                                                                                           |
+| Dashboard shows no results                                  | Result files must have `"schema_version": "2"`; start `npm run dev` from `dashboard/`                                                                                              |
+| V5 IDL not found                                            | Run `anchor build` in `contracts/solana/` first                                                                                                                                    |
+| `DeclaredProgramIdMismatch` on deploy                       | Run `anchor keys sync && anchor build && anchor deploy` — keypair IDs drifted from `declare_id!` (common after validator reset or keypair regeneration)                            |
+| `OSError: Cannot load native module 'Crypto.Util._cpuid_c'` | pycryptodome was installed from Git Bash (MinGW build). Reinstall from PowerShell: `.\.venv\Scripts\Activate.ps1` then `pip uninstall pycryptodome -y && pip install pycryptodome` |
+
+---
+
+## Windows Quick Start
+
+On Windows, the EVM toolchain (Node.js, Python, dashboard) runs **natively**. Solana requires **WSL 2** — all Solana/Anchor commands must run inside a WSL terminal.
+
+### Prerequisites — Windows native
+
+Install the following using `winget` (Windows Package Manager, built into Windows 11) or the linked installers:
+
+```powershell
+winget install OpenJS.NodeJS.LTS          # Node.js 20.x LTS
+winget install Python.Python.3.11         # Python 3.11+
+winget install Git.Git                    # Git
+winget install Microsoft.DotNet.SDK.8     # .NET 8 SDK (optional — .NET client only)
+```
+
+WSL 2 + Ubuntu 22.04 is required for Solana — see Step 2 below.
+
+### Step 1 — EVM contracts (PowerShell or cmd)
+
+```powershell
+cd contracts\evm
+npm install
+npx hardhat compile        # expect: Compiled 12 Solidity files successfully
+npx hardhat test           # 77 tests — no external node needed (~2s)
+```
+
+Start a local node (keep open in a separate terminal):
+
+```powershell
+npx hardhat node
+```
+
+Deploy all three variants:
+
+```powershell
+npx hardhat run scripts/deploy.ts --network localhost
+# Note the printed MockERC20, Factory, and Campaign addresses for .env
+```
+
+### Step 2 — Solana programs (WSL 2)
+
+**Install WSL 2** — open PowerShell as Administrator and run:
+
+```powershell
+wsl --install          # installs WSL 2 + Ubuntu 22.04; reboot when prompted
+```
+
+After rebooting, open the **Ubuntu** terminal (search "Ubuntu" in the Start menu or open Windows Terminal → Ubuntu tab). Complete the [one-time WSL setup](#one-time-wsl-setup), then:
+
+```bash
+# Inside the WSL terminal — navigate to the repo
+# Windows drives are mounted at /mnt/c/...
+cd "/mnt/c/Users/<your-name>/Desktop/SCHOOL/Master rad/multi-chain-crowdfunding-analyses/contracts/solana"
+npm install
+anchor build        # compiles V4 + V5 to SBF bytecode
+anchor test         # 18 passing (~5 min)
+```
+
+> For best filesystem performance, clone the repo inside WSL's home directory (`~/`) rather than working from `/mnt/c/...`. Anchor build times are significantly faster on the native ext4 filesystem.
+
+Start a persistent localnet validator (WSL terminal 1 — must run from WSL home `~`):
+
+```bash
+cd ~
+solana-test-validator --reset
+```
+
+Deploy (WSL terminal 2):
+
+```bash
+cd "/mnt/c/Users/<your-name>/...  /contracts/solana"
+anchor deploy
+```
+
+> If you see `DeclaredProgramIdMismatch` errors after deploy, the keypair-derived program ID no longer matches `declare_id!` in the source. Fix with:
+>
+> ```bash
+> anchor keys sync   # patches declare_id! + Anchor.toml to match keypair files
+> anchor build
+> anchor deploy
+> ```
+>
+> This is common after a validator reset or keypair regeneration. After a successful redeploy, update `SOLANA_PROGRAM_ID_V4` / `SOLANA_PROGRAM_ID_V5` in the root `.env`.
+
+### Recreate venv from PowerShell
+
+If you see C extension errors like `No module named 'bitarray._bitarray'`, `OSError: Cannot load native module 'Crypto.Util._cpuid_c'`, or `No module named 'ckzg'`, the venv was corrupted by packages installed from Git Bash (MinGW `.pyd` files that native Windows CPython cannot load). Delete and recreate it entirely from PowerShell:
+
+```powershell
+cd benchmarks
+Remove-Item -Recurse -Force .venv
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Then re-run the install steps in Step 3 below. **Always run `pip install` from PowerShell, never from Git Bash, on Windows.**
+
+### Step 3 — Python benchmark harness (PowerShell)
+
+```powershell
+cd benchmarks
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+
+# Install in stages — plain `pip install -r requirements.txt` will fail
+# because web3 pins lru-dict<1.3.0 but 1.2.x has no prebuilt Windows wheel.
+python -m pip install --no-deps web3==6.20.3
+python -m pip install lru-dict==1.3.0
+python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
+python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" `
+    "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" `
+    "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" `
+    aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" `
+    typing-extensions "toolz>=0.11.2,<0.12.0" ckzg
+
+# EVM lifecycle (Hardhat node must be running)
+$env:VARIANT = "V1"; $env:CLIENT = "python"; python run_tests.py --platform evm
+$env:VARIANT = "V2"; $env:CLIENT = "python"; python run_tests.py --platform evm
+$env:VARIANT = "V3"; $env:CLIENT = "python"; python run_tests.py --platform evm
+
+# Aggregate results
+python collect_metrics.py
+```
+
+> **Solana benchmarks must run inside WSL**, not PowerShell. The Python harness imports `anchorpy` and `solders`, which depend on the Solana CLI and Anchor toolchain — both WSL-only on Windows.
+>
+> The PowerShell venv (`.venv/`) uses Windows `.exe` binaries and **cannot be activated in WSL**. WSL needs its own Linux venv at `.venv-linux/`.
+>
+> **One-time WSL venv setup** (run once, from WSL):
+>
+> ```bash
+> cd "/mnt/c/Users/<your-name>/Desktop/SCHOOL/Master rad/multi-chain-crowdfunding-analyses"
+>
+> # Install Python 3.12 if not present
+> python3.12 --version 2>/dev/null || sudo apt-get install -y python3.12 python3.12-venv
+>
+> cd benchmarks
+> python3.12 -m venv .venv-linux
+> source .venv-linux/bin/activate
+> python -m pip install --upgrade pip
+> python -m pip install --no-deps web3==6.20.3
+> python -m pip install lru-dict==1.3.0
+> python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
+> python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" \
+>     "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" \
+>     "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" \
+>     aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" \
+>     typing-extensions "toolz>=0.11.2,<0.12.0"
+> ```
+>
+> **Running Solana benchmarks** (WSL, venv already set up):
+>
+> ```bash
+> cd "/mnt/c/Users/<your-name>/Desktop/SCHOOL/Master rad/multi-chain-crowdfunding-analyses"
+> source benchmarks/.venv-linux/bin/activate
+>
+> # solana-test-validator must be running (WSL terminal 1) and program deployed (Step 2)
+> VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
+> VARIANT=V5 CLIENT=python python benchmarks/run_tests.py --platform solana
+> ```
+>
+> The EVM benchmarks (`--platform evm`) also work from WSL — Hardhat on `127.0.0.1:8545` is forwarded automatically by WSL 2.
+
+### Step 4 — TypeScript client (PowerShell)
+
+```powershell
+cd clients\ts
+npm install
+# Edit .env at repo root — paste addresses from Step 1 deploy output and Anchor.toml program IDs
+```
+
+#### EVM lifecycle
+
+**Key points for PowerShell:**
+
+- `--amount` / `--soft-cap` / `--hard-cap` take **human-readable USDC** (e.g. `10` = 10 USDC) — the client multiplies by 10⁶ internally. Do **not** pass raw units.
+- After `create-campaign`, copy `data.campaignAddress` from the JSON output into `.env` as `CAMPAIGN_ADDRESS_{VARIANT}` **before** running any other command.
+- PowerShell's `curl` is an alias for `Invoke-WebRequest` — use `iwr` for Hardhat RPC calls, not Unix-style `curl -H/-d`.
+
+```powershell
+# 1. Create campaign (soft-cap 10 USDC → one contribution is enough to succeed)
+$env:VARIANT = "V1"; npm run create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-days 1
+# → copy data.campaignAddress from JSON output
+# → add/update in .env: CAMPAIGN_ADDRESS_V1=<address>
+
+# 2. Contribute
+$env:VARIANT = "V1"; npm run contribute -- --amount 10
+for ($i = 0; $i -lt 9; $i++) { $env:VARIANT = "V1"; npm run contribute -- --amount 10 }
+
+# 3. Advance time past the 1-day deadline
+iwr http://127.0.0.1:8545 -Method POST -ContentType "application/json" `
+  -Body '{"jsonrpc":"2.0","method":"evm_increaseTime","params":[86401],"id":1}'
+iwr http://127.0.0.1:8545 -Method POST -ContentType "application/json" `
+  -Body '{"jsonrpc":"2.0","method":"evm_mine","params":[],"id":2}'
+
+# 4. Finalize → should report successful: true
+$env:VARIANT = "V1"; npm run finalize
+
+# 5. Withdraw milestones (run 3× for [30,30,40] schedule)
+$env:VARIANT = "V1"; npm run withdraw
+$env:VARIANT = "V1"; npm run withdraw
+$env:VARIANT = "V1"; npm run withdraw
+
+$env:VARIANT = "V1"; npm run status
+```
+
+> **Refund path:** use a softCap above what you contribute (e.g. `--soft-cap 1000`), then after
+> finalize call `npm run refund` instead of `withdraw`.
+
+> **Other variants** — same steps, change `VARIANT`:
+>
+> ```powershell
+> $env:VARIANT = "V2"; npm run create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-days 1
+> $env:VARIANT = "V3"; npm run create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-days 1
+> ```
+
+#### Solana lifecycle
+
+Run `sol:*` scripts inside the WSL terminal. Solana has no time-warp RPC — use a short
+`--deadline-seconds` so you don't have to wait.
+
+```bash
+# V4 — SPL Token (classic)
+VARIANT=V4 npm run sol:create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-seconds 15
+# → copy campaignAddress → set SOLANA_CAMPAIGN_ADDRESS in .env or pass --campaign <ADDRESS>
+VARIANT=V4 npm run sol:contribute -- --amount 10
+# wait 15 s for deadline to pass
+VARIANT=V4 npm run sol:finalize
+VARIANT=V4 npm run sol:withdraw
+VARIANT=V4 npm run sol:status
+
+# V5 — Token-2022 extensions (identical flow, different program)
+VARIANT=V5 npm run sol:create-campaign -- --soft-cap 10 --hard-cap 500 --deadline-seconds 15
+VARIANT=V5 npm run sol:contribute -- --amount 10
+# wait 15 s
+VARIANT=V5 npm run sol:finalize
+VARIANT=V5 npm run sol:withdraw
+VARIANT=V5 npm run sol:status
+```
+
+### Step 5 — .NET client (PowerShell)
+
+```powershell
+cd clients\dotnet
+dotnet build
+# Edit .env at repo root — addresses from Step 1 deploy output and Anchor.toml program IDs
+```
+
+#### EVM lifecycle
+
+```powershell
+$env:VARIANT = "V1"; dotnet run -- create-campaign
+# → copy data.campaignAddress from output
+# → add/update in .env: CAMPAIGN_ADDRESS_V1=<address>
+$env:VARIANT = "V1"; dotnet run -- contribute --amount 10
+$env:VARIANT = "V1"; dotnet run -- finalize
+$env:VARIANT = "V1"; dotnet run -- withdraw
+$env:VARIANT = "V1"; dotnet run -- status
+```
+
+> **Other variants:** change `$env:VARIANT` to `"V2"` or `"V3"`.
+
+#### Solana lifecycle (WSL only)
+
+```bash
+VARIANT=V4 dotnet run -- sol:create-campaign --deadline-seconds 15
+VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:withdraw --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:status
+
+# V5 — Token-2022
+VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 15
+VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:withdraw --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:status
+```
+
+### Step 6 — Python client (PowerShell)
+
+The Python client shares the venv from Step 3. Run from the repo root.
+
+```powershell
+# Activate the venv (if not already active)
+.\.venv\Scripts\Activate.ps1
+
+# Load .env variables into the current shell
+Get-Content .env | ForEach-Object {
+  if ($_ -match '^([^#].+?)=(.*)$') {
+    [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+  }
+}
+
+# EVM lifecycle — set VARIANT to select V1/V2/V3
+$env:VARIANT = "V1"; python -m clients.python evm:status
+$env:VARIANT = "V1"; python -m clients.python evm:contribute --amount 10000000
+$env:VARIANT = "V2"; python -m clients.python evm:contribute --amount 10000000
+$env:VARIANT = "V3"; python -m clients.python evm:contribute --amount 10000000
+```
+
+> **Solana:** run `sol:*` commands inside WSL using the Linux venv (`.venv-linux`). See Step 3 for WSL venv setup.
+>
+> ```bash
+> source benchmarks/.venv-linux/bin/activate
+> set -a; source .env; set +a
+> VARIANT=V4 python -m clients.python sol:contribute --amount 10000000
+> VARIANT=V4 python -m clients.python sol:status
+> VARIANT=V5 python -m clients.python sol:contribute --amount 10000000
+> VARIANT=V5 python -m clients.python sol:status
+> ```
+
+### Step 7 — Dashboard (PowerShell)
+
+```powershell
+cd dashboard
+npm install
+npm run dev        # open http://localhost:3000
+```
+
+Result files from benchmark runs appear automatically after a browser refresh.
+
+### Windows-specific notes
+
+| Topic                                                                 | Note                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Python binary name**                                                | Windows installers register `python` (not `python3`). Use `python` everywhere.                                                                                                                                                                                                                        |
+| **venv activation**                                                   | `.venv\Scripts\activate` — not `source .venv/bin/activate` (that is bash syntax).                                                                                                                                                                                                                     |
+| **Environment variables**                                             | PowerShell: `$env:VAR = "value"`. cmd: `set VAR=value`. Both must be set before the command on the same line or as separate statements.                                                                                                                                                               |
+| **Path separators**                                                   | Use `\` in PowerShell/cmd. Git Bash and WSL accept `/`. `npm run` scripts work with either.                                                                                                                                                                                                           |
+| **Solana is WSL-only**                                                | Solana CLI and Anchor have no native Windows binaries. Every `anchor`, `solana`, and `solana-test-validator` command must run inside a WSL 2 terminal.                                                                                                                                                |
+| **Cross-env file access**                                             | Your Windows files are at `/mnt/c/...` inside WSL. WSL files are at `\\wsl$\Ubuntu-22.04\home\<user>\` from Windows Explorer.                                                                                                                                                                         |
+| **Port forwarding**                                                   | WSL 2 automatically forwards localhost ports. Hardhat node on `127.0.0.1:8545` and the Solana validator on `127.0.0.1:8899` are reachable from both Windows and WSL.                                                                                                                                  |
+| **C extension load failures** (`_cpuid_c`, `_bitarray`, `ckzg`, etc.) | Packages were installed from Git Bash, which builds MinGW `.pyd` files that native Windows CPython cannot load. Fix: delete `.venv` and recreate it entirely from PowerShell — see [Recreate venv from PowerShell](#recreate-venv-from-powershell). Never run `pip install` from Git Bash on Windows. |
 
 ---
 
@@ -271,12 +719,11 @@ Prints three deployment summary tables including all contract and tier-token add
 
 #### 4. Configure environment variables
 
-```bash
-cd contracts/evm
-cp .env.example .env
-# edit .env and paste your values:
-#   PRIVATE_KEY=0xYOUR_PRIVATE_KEY
-#   SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+Edit the root `.env` and paste your Sepolia values:
+
+```
+PRIVATE_KEY=0xYOUR_SEPOLIA_PRIVATE_KEY
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 ```
 
 > `.env` is gitignored — it will never be committed.
@@ -397,10 +844,10 @@ solana-keygen new --no-bip39-passphrase
 
 The Solana workspace contains two Anchor programs:
 
-| Program | Variant | Program ID |
-|---------|---------|-----------|
-| `crowdfunding` | V4 — SPL Token (classic) | `BiVZkwVjTU1vBKa7TRQFU6w97NGBSK5xvuNdAaDtPHWU` |
-| `crowdfunding_token2022` | V5 — Token-2022 extensions | `46xPA3ukhGDwk1w9ZZGCmkmVWuRR1nT9Z3QsPrDNxRyy` |
+| Program                  | Variant                    | Program ID                                     |
+| ------------------------ | -------------------------- | ---------------------------------------------- |
+| `crowdfunding`           | V4 — SPL Token (classic)   | `4agCFfWuoR6MPGXeAb6cXQTHcWmxvqD29uanxJd4bkXv` |
+| `crowdfunding_token2022` | V5 — Token-2022 extensions | `AtaYCBbNJJwwwckTouZ2G4ZgrzPNT2JtZF1yL7zUxQpC` |
 
 ```bash
 cd contracts/solana
@@ -545,48 +992,64 @@ npm install
 
 #### Environment
 
-```bash
-cp .env.example .env
-# Edit .env — populate contract addresses from deploy.ts output
-```
+All variables are read from the root `.env`. Populate it with addresses from `deploy.ts` output and `Anchor.toml` program IDs.
 
-Required EVM variables: `RPC_URL`, `PRIVATE_KEY`, `FACTORY_ADDRESS`, `CAMPAIGN_ADDRESS`, `PAYMENT_TOKEN_ADDRESS`.
-Required Solana variables: `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `SOLANA_PROGRAM_ID`, `SOLANA_PAYMENT_MINT`, `SOLANA_CAMPAIGN_ADDRESS`, `SOLANA_CAMPAIGN_ID`.
+Required EVM variables: `RPC_URL`, `PRIVATE_KEY`, `VARIANT`, `FACTORY_ADDRESS_{VARIANT}`, `CAMPAIGN_ADDRESS_{VARIANT}`, `PAYMENT_TOKEN_ADDRESS`.
+Required Solana variables: `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `SOLANA_PROGRAM_ID_V4` / `SOLANA_PROGRAM_ID_V5`, `SOLANA_PAYMENT_MINT`, `SOLANA_CAMPAIGN_ADDRESS`, `SOLANA_CAMPAIGN_ID`.
 
 #### EVM commands
 
-All scripts use `tsx` for ESM execution. Run from `clients/ts/`:
+All scripts use `tsx` for ESM execution. Run from `clients/ts/`.
+Set `VARIANT` to select the contract version — the client reads `FACTORY_ADDRESS_{VARIANT}`
+and `CAMPAIGN_ADDRESS_{VARIANT}` from `.env`.
 
 ```bash
-npm run create-campaign                          # defaults: softCap=100e6, hardCap=500e6, 30 days, [30,30,40]
-npm run create-campaign -- --soft-cap 50000000 --hard-cap 200000000 --deadline-days 7
+# V1 — ERC-20 receipt tokens
+VARIANT=V1 npm run create-campaign                          # defaults: softCap=100 USDC, hardCap=500 USDC, 30 days, [30,30,40]
+VARIANT=V1 npm run create-campaign -- --soft-cap 50 --hard-cap 200 --deadline-days 7
+VARIANT=V1 npm run contribute                               # default: 10 USDC
+VARIANT=V1 npm run contribute -- --amount 25
+VARIANT=V1 npm run finalize
+VARIANT=V1 npm run withdraw
+VARIANT=V1 npm run refund
+VARIANT=V1 npm run status
+VARIANT=V1 npm run status -- --contributor 0xABC...
 
-npm run contribute                               # default: 10 USDC (10000000 raw)
-npm run contribute -- --amount 25000000
+# V2 — ERC-4626 vault shares
+VARIANT=V2 npm run create-campaign
+VARIANT=V2 npm run contribute -- --amount 25
+VARIANT=V2 npm run finalize && VARIANT=V2 npm run withdraw
 
-npm run finalize
-npm run withdraw
-npm run refund
-
-npm run status
-npm run status -- --contributor 0xABC...
+# V3 — ERC-1155 tier tokens
+VARIANT=V3 npm run create-campaign
+VARIANT=V3 npm run contribute -- --amount 25
+VARIANT=V3 npm run finalize && VARIANT=V3 npm run withdraw
 ```
 
 #### Solana commands
 
+Set `VARIANT` to switch between V4 (SPL Token classic) and V5 (Token-2022).
+Run inside WSL.
+
 ```bash
-npm run sol:create-campaign
-npm run sol:create-campaign -- --soft-cap 100000000 --hard-cap 500000000 --deadline-seconds 1800
+# V4 — SPL Token (classic)
+VARIANT=V4 npm run sol:create-campaign
+VARIANT=V4 npm run sol:create-campaign -- --soft-cap 100000000 --hard-cap 500000000 --deadline-seconds 1800
+VARIANT=V4 npm run sol:contribute
+VARIANT=V4 npm run sol:contribute -- --amount 10 --campaign <ADDRESS>
+VARIANT=V4 npm run sol:finalize
+VARIANT=V4 npm run sol:withdraw
+VARIANT=V4 npm run sol:refund
+VARIANT=V4 npm run sol:status
+VARIANT=V4 npm run sol:status -- --campaign <ADDRESS> --contributor <PUBKEY>
 
-npm run sol:contribute
-npm run sol:contribute -- --amount 10000000 --campaign <ADDRESS>
-
-npm run sol:finalize
-npm run sol:withdraw
-npm run sol:refund
-
-npm run sol:status
-npm run sol:status -- --campaign <ADDRESS> --contributor <PUBKEY>
+# V5 — Token-2022 extensions
+VARIANT=V5 npm run sol:create-campaign -- --deadline-seconds 1800
+VARIANT=V5 npm run sol:contribute -- --amount 10 --campaign <ADDRESS>
+VARIANT=V5 npm run sol:finalize
+VARIANT=V5 npm run sol:withdraw
+VARIANT=V5 npm run sol:refund
+VARIANT=V5 npm run sol:status -- --campaign <ADDRESS>
 ```
 
 #### JSON output format
@@ -626,47 +1089,63 @@ dotnet build
 
 #### Environment
 
-```bash
-cp .env.example .env
-# Edit .env — populate contract addresses from deploy.ts / anchor deploy output
-```
+All variables are read from the root `.env`. Populate it with addresses from `deploy.ts` / `anchor deploy` output.
 
-Uses `dotenv.net` to load `.env`. Same variable names as the TS client for EVM;
-Solana variables: `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `SOLANA_PROGRAM_ID`,
+Uses `dotenv.net` to load `../../.env` (resolved from `clients/dotnet/`). Same variable names as the TS client for EVM;
+Solana variables: `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `SOLANA_PROGRAM_ID_V4` / `SOLANA_PROGRAM_ID_V5`,
 `SOLANA_PAYMENT_MINT`, `SOLANA_CAMPAIGN_ADDRESS`, `SOLANA_CAMPAIGN_ID`.
 
 #### EVM commands
 
+Set `VARIANT` to select the contract version. Pass it as an environment variable or
+set `VARIANT=V1` in `.env`.
+
 ```bash
-dotnet run -- create-campaign
-dotnet run -- create-campaign --soft-cap 50000000 --hard-cap 200000000 --deadline-days 7
+# V1 — ERC-20 receipt tokens
+VARIANT=V1 dotnet run -- create-campaign
+VARIANT=V1 dotnet run -- create-campaign --soft-cap 50 --hard-cap 200 --deadline-days 7
+VARIANT=V1 dotnet run -- contribute
+VARIANT=V1 dotnet run -- contribute --amount 25
+VARIANT=V1 dotnet run -- finalize
+VARIANT=V1 dotnet run -- withdraw
+VARIANT=V1 dotnet run -- refund
+VARIANT=V1 dotnet run -- status
+VARIANT=V1 dotnet run -- status --contributor 0xABC...
 
-dotnet run -- contribute
-dotnet run -- contribute --amount 25000000
+# V2 — ERC-4626 vault shares
+VARIANT=V2 dotnet run -- create-campaign
+VARIANT=V2 dotnet run -- contribute --amount 25
+VARIANT=V2 dotnet run -- finalize && VARIANT=V2 dotnet run -- withdraw
 
-dotnet run -- finalize
-dotnet run -- withdraw
-dotnet run -- refund
-
-dotnet run -- status
-dotnet run -- status --contributor 0xABC...
+# V3 — ERC-1155 tier tokens
+VARIANT=V3 dotnet run -- create-campaign
+VARIANT=V3 dotnet run -- contribute --amount 25
+VARIANT=V3 dotnet run -- finalize && VARIANT=V3 dotnet run -- withdraw
 ```
 
 #### Solana commands
 
+Set `VARIANT` to switch between V4 (SPL Token) and V5 (Token-2022). Run inside WSL.
+
 ```bash
-dotnet run -- sol:create-campaign
-dotnet run -- sol:create-campaign --soft-cap 100000000 --hard-cap 500000000 --deadline-seconds 1800
+# V4 — SPL Token (classic)
+VARIANT=V4 dotnet run -- sol:create-campaign
+VARIANT=V4 dotnet run -- sol:create-campaign --soft-cap 100000000 --hard-cap 500000000 --deadline-seconds 1800
+VARIANT=V4 dotnet run -- sol:contribute
+VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:withdraw --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:refund --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:status
+VARIANT=V4 dotnet run -- sol:status --campaign <ADDRESS> --contributor <PUBKEY>
 
-dotnet run -- sol:contribute
-dotnet run -- sol:contribute --amount 10000000 --campaign <ADDRESS>
-
-dotnet run -- sol:finalize --campaign <ADDRESS>
-dotnet run -- sol:withdraw --campaign <ADDRESS>
-dotnet run -- sol:refund --campaign <ADDRESS>
-
-dotnet run -- sol:status
-dotnet run -- sol:status --campaign <ADDRESS> --contributor <PUBKEY>
+# V5 — Token-2022 extensions
+VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 1800
+VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:withdraw --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:refund --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:status --campaign <ADDRESS>
 ```
 
 #### JSON output
@@ -692,33 +1171,56 @@ npx hardhat run scripts/deploy.ts --network localhost
 ```
 
 Copy the deployed addresses (`MockERC20`, `CrowdfundingFactory`, `CrowdfundingCampaign`)
-into the `.env` files for both `clients/ts/` and `clients/dotnet/`.
+into the root `.env` (`PAYMENT_TOKEN_ADDRESS`, `FACTORY_ADDRESS_V1`, `CAMPAIGN_ADDRESS_V1`).
 
-Then run the full lifecycle in order:
+> **After each `create-campaign` run:** the new campaign address is printed in the JSON output
+> (`data.campaignAddress`). Copy it into `.env` as `CAMPAIGN_ADDRESS_{VARIANT}` before running
+> `contribute`, `finalize`, or `withdraw` — otherwise those scripts will use the stale address
+> from the previous deployment.
+
+Then run the full lifecycle in order. Set `VARIANT` to select which deployed contract to use:
 
 ```bash
-# ── TypeScript client ──
+# ── TypeScript client — V1 (ERC-20) ──
 cd clients/ts
-npm run create-campaign
-npm run contribute -- --amount 10000000
+VARIANT=V1 npm run create-campaign
+VARIANT=V1 npm run contribute -- --amount 10
 # (repeat contribute or advance time via Hardhat RPC to pass deadline)
-npm run finalize
-npm run withdraw         # if campaign succeeded (totalRaised >= softCap)
-npm run refund           # if campaign failed (totalRaised < softCap)
-npm run status
+VARIANT=V1 npm run finalize
+VARIANT=V1 npm run withdraw         # if campaign succeeded (totalRaised >= softCap)
+VARIANT=V1 npm run refund           # if campaign failed (totalRaised < softCap)
+VARIANT=V1 npm run status
+
+# ── TypeScript client — V2 (ERC-4626) ──
+VARIANT=V2 npm run create-campaign
+VARIANT=V2 npm run contribute -- --amount 10
+VARIANT=V2 npm run finalize && VARIANT=V2 npm run withdraw
+
+# ── TypeScript client — V3 (ERC-1155) ──
+VARIANT=V3 npm run create-campaign
+VARIANT=V3 npm run contribute -- --amount 10
+VARIANT=V3 npm run finalize && VARIANT=V3 npm run withdraw
 
 # ── .NET client (same node, same contracts) ──
 cd clients/dotnet
-dotnet run -- status     # verify it reads the same state
-dotnet run -- contribute --amount 10000000
-dotnet run -- status
+VARIANT=V1 dotnet run -- status     # verify it reads the same state
+VARIANT=V1 dotnet run -- contribute --amount 10
+VARIANT=V2 dotnet run -- status
 ```
 
 To test the **refund path**, create a campaign with a high softCap, contribute less
 than the softCap, advance time past the deadline, finalize, then refund:
 
+```powershell
+# Advance Hardhat time by 31 days (PowerShell — curl is Invoke-WebRequest here, not Unix curl)
+iwr http://127.0.0.1:8545 -Method POST -ContentType "application/json" `
+  -Body '{"jsonrpc":"2.0","method":"evm_increaseTime","params":[2678400],"id":1}'
+iwr http://127.0.0.1:8545 -Method POST -ContentType "application/json" `
+  -Body '{"jsonrpc":"2.0","method":"evm_mine","params":[],"id":2}'
+```
+
 ```bash
-# Advance Hardhat time by 31 days (from any client directory)
+# Advance Hardhat time by 31 days (bash / WSL / Git Bash)
 curl -s -X POST http://127.0.0.1:8545 \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"evm_increaseTime","params":[2678400],"id":1}'
@@ -749,32 +1251,38 @@ spl-token create-token --decimals 6
 # Note the mint address → set as SOLANA_PAYMENT_MINT in .env
 ```
 
-Update `.env` files in both `clients/ts/` and `clients/dotnet/` with:
+Update the root `.env` with:
 
-- `SOLANA_PROGRAM_ID` — from `anchor deploy` output
+- `SOLANA_PROGRAM_ID_V4` — from `anchor deploy` output (crowdfunding program)
 - `SOLANA_PAYMENT_MINT` — from `spl-token create-token` output
 - `SOLANA_KEYPAIR_PATH` — path to your Solana keypair JSON file
 
-Then run the lifecycle:
+Then run the lifecycle. Set `VARIANT` to select V4 (SPL Token) or V5 (Token-2022):
 
 ```bash
-# ── TypeScript client ──
+# ── TypeScript client — V4 (SPL Token) ──
 cd clients/ts
-npm run sol:create-campaign
+VARIANT=V4 npm run sol:create-campaign -- --deadline-seconds 10
 # Copy the campaignAddress from output → set SOLANA_CAMPAIGN_ADDRESS in .env or pass --campaign
+VARIANT=V4 npm run sol:contribute -- --amount 10
+# Wait for deadline (10 s with --deadline-seconds 10)
+VARIANT=V4 npm run sol:finalize
+VARIANT=V4 npm run sol:withdraw      # success path
+VARIANT=V4 npm run sol:refund        # fail path
+VARIANT=V4 npm run sol:status
 
-npm run sol:contribute -- --amount 10000000
-
-# Wait for deadline to pass (default 1800s = 30 min; use --deadline-seconds 10 for quick testing)
-npm run sol:finalize
-npm run sol:withdraw      # success path
-npm run sol:refund        # fail path
-npm run sol:status
+# ── TypeScript client — V5 (Token-2022) ──
+VARIANT=V5 npm run sol:create-campaign -- --deadline-seconds 10
+VARIANT=V5 npm run sol:contribute -- --amount 10
+VARIANT=V5 npm run sol:finalize
+VARIANT=V5 npm run sol:withdraw
+VARIANT=V5 npm run sol:status
 
 # ── .NET client ──
 cd clients/dotnet
-dotnet run -- sol:status --campaign <ADDRESS>
-dotnet run -- sol:contribute --amount 10000000 --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:status --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
 ```
 
 > **Quick test tip:** Use `--deadline-seconds 10` when creating a campaign so you
@@ -786,12 +1294,18 @@ For thesis data integrity, run the same operation from both clients against the 
 node and compare the JSON output:
 
 ```bash
-# EVM — gasUsed must be identical for the same operation
-cd clients/ts && npm run status 2>/dev/null | jq .data.totalRaised
-cd clients/dotnet && dotnet run -- status 2>/dev/null | jq .data.totalRaised
+# EVM — gasUsed must be identical for the same variant and operation
+VARIANT=V1 npm run status 2>/dev/null | jq .data.totalRaised    # from clients/ts
+VARIANT=V1 dotnet run -- status 2>/dev/null | jq .data.totalRaised  # from clients/dotnet
 # Both should return the same value
 
-# Solana — fee/slot should match for equivalent operations
+# Repeat for other EVM variants
+VARIANT=V2 npm run status 2>/dev/null | jq .data.totalRaised
+VARIANT=V3 npm run status 2>/dev/null | jq .data.totalRaised
+
+# Solana — fee/slot should match for equivalent variant and operation
+VARIANT=V4 npm run sol:status 2>/dev/null | jq .data.totalRaised
+VARIANT=V5 npm run sol:status 2>/dev/null | jq .data.totalRaised
 ```
 
 Pipe any command output through `jq .` to validate JSON format.
@@ -828,12 +1342,12 @@ python -m pip install lru-dict==1.3.0
 # 3. Solana + formatting
 python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
 
-# 4. web3 runtime deps
+# 4. web3 runtime deps (including ckzg — EIP-4844 blob tx; hard-imported by web3 6.x)
 python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" \
     "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" \
     "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" \
     aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" \
-    typing-extensions "toolz>=0.11.2,<0.12.0"
+    typing-extensions "toolz>=0.11.2,<0.12.0" ckzg
 ```
 
 Verify:
@@ -865,12 +1379,12 @@ python -m pip install lru-dict==1.3.0
 # 3. Solana + formatting
 python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
 
-# 4. web3 runtime deps (version-pinned for anchorpy/solana compat)
+# 4. web3 runtime deps (including ckzg — EIP-4844 blob tx; hard-imported by web3 6.x)
 python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" ^
     "eth-typing>=3.0.0,<5" "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" ^
     "eth-hash[pycryptodome]>=0.5.1" "jsonschema>=4.0.0" "protobuf>=4.21.6" ^
     aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" ^
-    typing-extensions "toolz>=0.11.2,<0.12.0"
+    typing-extensions "toolz>=0.11.2,<0.12.0" ckzg
 ```
 
 Verify:
@@ -893,17 +1407,18 @@ python -c "import tabulate; print('tabulate OK')"
 All tunable constants live in `benchmarks/config.py`. Override via environment
 variables:
 
-| Variable            | Default                       | Description                                              |
-| ------------------- | ----------------------------- | -------------------------------------------------------- |
-| `EVM_RPC_URL`       | `http://127.0.0.1:8545`       | Hardhat JSON-RPC endpoint                                |
-| `EVM_MNEMONIC`      | Hardhat default test mnemonic | HD wallet mnemonic (localnet only)                       |
-| `SOLANA_RPC_URL`    | `http://127.0.0.1:8899`       | Solana validator RPC endpoint                            |
-| `ANCHOR_WALLET`     | `~/.config/solana/id.json`    | Payer keypair path                                       |
-| `SOLANA_PROGRAM_ID` | (from Anchor.toml)            | Deployed program ID                                      |
-| `N_CONTRIBUTIONS`   | `50`                          | Number of sequential contributions                       |
-| `VARIANT`           | `V1`                          | Contract variant tag: V1 ERC-20, V4 SPL, V2, V3, V5     |
-| `CLIENT`            | `python`                      | Client label: python, ts, dotnet                         |
-| `BENCHMARK_ENV`     | _(auto-detected)_             | Override environment label (e.g. `sepolia`, `solana-devnet`) |
+| Variable               | Default                          | Description                                                  |
+| ---------------------- | -------------------------------- | ------------------------------------------------------------ |
+| `EVM_RPC_URL`          | `http://127.0.0.1:8545`          | Hardhat JSON-RPC endpoint                                    |
+| `EVM_MNEMONIC`         | Hardhat default test mnemonic    | HD wallet mnemonic (localnet only)                           |
+| `SOLANA_RPC_URL`       | `http://127.0.0.1:8899`          | Solana validator RPC endpoint                                |
+| `ANCHOR_WALLET`        | `~/.config/solana/id.json`       | Payer keypair path                                           |
+| `SOLANA_PROGRAM_ID_V4` | `4agCFfWu...` (from Anchor.toml) | V4 deployed program ID                                       |
+| `SOLANA_PROGRAM_ID_V5` | `AtaYCBbN...` (from Anchor.toml) | V5 deployed program ID                                       |
+| `N_CONTRIBUTIONS`      | `50`                             | Number of sequential contributions                           |
+| `VARIANT`              | `V1`                             | Contract variant tag: V1 ERC-20, V4 SPL, V2, V3, V5          |
+| `CLIENT`               | `python`                         | Client label: python, ts, dotnet                             |
+| `BENCHMARK_ENV`        | _(auto-detected)_                | Override environment label (e.g. `sepolia`, `solana-devnet`) |
 
 `BENCHMARK_ENV` is inferred from the RPC URL if not set: `infura`/`alchemy`/`sepolia`
 in `EVM_RPC_URL` → `sepolia`; `devnet` in `SOLANA_RPC_URL` → `solana-devnet`.
@@ -1082,6 +1597,7 @@ Result files use the canonical schema v2 format:
 ```
 
 **Field notes:**
+
 - `scenario`: `"success"` (contribute/finalize/withdraw), `"refund"`, or `"throughput"`
 - `process_elapsed_ms`: wall-clock time including subprocess startup (null for Python harness, populated for ts/dotnet client benchmark)
 - **EVM `cost`:** gas used as a string integer. Fiat conversion requires live gas price.
@@ -1120,20 +1636,15 @@ cd contracts/evm && npx hardhat node &
 # 2. Deploy contracts, capture addresses
 python benchmarks/deploy_evm.py --variant V1 > /tmp/evm_deploy.json
 
-# 3. Configure ts client
-cp clients/ts/.env.localnet clients/ts/.env
-# Edit clients/ts/.env and paste addresses from /tmp/evm_deploy.json:
-#   FACTORY_ADDRESS=...  CAMPAIGN_ADDRESS=...  PAYMENT_TOKEN_ADDRESS=...
+# 3. Edit root .env — paste addresses from /tmp/evm_deploy.json:
+#   FACTORY_ADDRESS_V1=...  CAMPAIGN_ADDRESS_V1=...  PAYMENT_TOKEN_ADDRESS=...
+# (ts and dotnet clients both read from the root .env automatically)
 
-# 4. Configure dotnet client
-cp clients/dotnet/.env.localnet clients/dotnet/.env
-# Edit clients/dotnet/.env and paste the same addresses.
-
-# 5. Python re-baseline
+# 4. Python re-baseline
 VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
 VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
 
-# 6. ts lifecycle + throughput
+# 5. ts lifecycle + throughput
 python benchmarks/run_client_benchmark.py \
     --platform evm --client ts --variant V1 --env hardhat-localnet \
     --deploy-json /tmp/evm_deploy.json
@@ -1141,7 +1652,7 @@ python benchmarks/run_throughput_client.py \
     --platform evm --client ts --variant V1 --env hardhat-localnet \
     --deploy-json /tmp/evm_deploy.json
 
-# 7. dotnet lifecycle + throughput
+# 6. dotnet lifecycle + throughput
 python benchmarks/run_client_benchmark.py \
     --platform evm --client dotnet --variant V1 --env hardhat-localnet \
     --deploy-json /tmp/evm_deploy.json
@@ -1149,27 +1660,40 @@ python benchmarks/run_throughput_client.py \
     --platform evm --client dotnet --variant V1 --env hardhat-localnet \
     --deploy-json /tmp/evm_deploy.json
 
-# 8. Collect results
+# 7. Collect results
 python benchmarks/collect_metrics.py --format github
 python benchmarks/collect_metrics.py --format latex \
     --output benchmarks/results/thesis_table.tex
 ```
 
-### Environment template files
+### Single root `.env`
 
-Use the template files to avoid editing `.env` manually:
+All clients (Hardhat, TS, .NET, Python) read from one file at the repo root:
 
-| Template | Platform | Environment |
-| -------- | -------- | ----------- |
-| `clients/ts/.env.localnet` | EVM + Solana | hardhat-localnet + solana-localnet |
-| `clients/ts/.env.sepolia`  | EVM + Solana | Sepolia testnet + solana-devnet |
-| `clients/dotnet/.env.localnet` | EVM + Solana | hardhat-localnet + solana-localnet |
-| `clients/dotnet/.env.sepolia`  | EVM + Solana | Sepolia testnet + solana-devnet |
+```
+.env          ← gitignored; your local values
+.env.example  ← committed template with placeholders
+```
+
+To switch to Sepolia, update these keys in root `.env`:
+
+```
+PRIVATE_KEY=0xYOUR_FUNDED_SEPOLIA_KEY
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+```
+
+For Python benchmarks, export before running:
 
 ```bash
-# Example: switch ts client to Sepolia
-cp clients/ts/.env.sepolia clients/ts/.env
-# Edit: paste YOUR_KEY, YOUR_PRIVATE_KEY, contract addresses from Sepolia deploy
+# bash / WSL
+set -a; source .env; set +a
+
+# PowerShell
+Get-Content .env | ForEach-Object {
+  if ($_ -match '^([^#].+?)=(.*)$') {
+    [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+  }
+}
 ```
 
 ### Limitations
@@ -1222,26 +1746,26 @@ npm start
 
 ### What it does
 
-| Feature | Details |
-| ------- | ------- |
-| Results overview | Loads all schema v2 `*.json` files from `benchmarks/results/`, groups by `(variant, client, environment, kind)`, and shows only the latest file per group |
-| Filter bar | Filter displayed results by variant, client, or environment; refresh button reloads from disk |
-| Result cards | Click a card to drill into per-operation gas/fee, latency, and key metric cards |
-| Comparative charts | Side-by-side TPS and cost-per-TPS bar charts; gas/fee and latency charts per operation |
-| Comparison table | Cross-variant operation table with sortable columns (click a client header to sort by cost/latency) |
-| Run panel (sidebar) | Select variant/client/benchmark type and start a live run; output streams in real time via polling |
-| `/benchmarks` page | Full comparison table + GasChart + LatencyChart + ThroughputChart in one scrollable view |
-| `/run` page | Full-page run form (equivalent to the sidebar panel) |
+| Feature             | Details                                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Results overview    | Loads all schema v2 `*.json` files from `benchmarks/results/`, groups by `(variant, client, environment, kind)`, and shows only the latest file per group |
+| Filter bar          | Filter displayed results by variant, client, or environment; refresh button reloads from disk                                                             |
+| Result cards        | Click a card to drill into per-operation gas/fee, latency, and key metric cards                                                                           |
+| Comparative charts  | Side-by-side TPS and cost-per-TPS bar charts; gas/fee and latency charts per operation                                                                    |
+| Comparison table    | Cross-variant operation table with sortable columns (click a client header to sort by cost/latency)                                                       |
+| Run panel (sidebar) | Select variant/client/benchmark type and start a live run; output streams in real time via polling                                                        |
+| `/benchmarks` page  | Full comparison table + GasChart + LatencyChart + ThroughputChart in one scrollable view                                                                  |
+| `/run` page         | Full-page run form (equivalent to the sidebar panel)                                                                                                      |
 
 ### API routes
 
 All API routes require the Node.js runtime (`export const runtime = "nodejs"`).
 
-| Route | Method | Description |
-| ----- | ------ | ----------- |
-| `/api/benchmarks` | GET | Returns all loaded `BenchmarkFile[]` objects from `benchmarks/results/` |
-| `/api/run` | POST | Spawns `benchmarks/run_tests.py` (or `--throughput`) as a subprocess; accepts `{ variant, client, kind }` body; returns `{ id, status: "running" }` (HTTP 202) |
-| `/api/run/[id]` | GET | Returns the current status, accumulated stdout/stderr output, and result file path for a run |
+| Route             | Method | Description                                                                                                                                                    |
+| ----------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/benchmarks` | GET    | Returns all loaded `BenchmarkFile[]` objects from `benchmarks/results/`                                                                                        |
+| `/api/run`        | POST   | Spawns `benchmarks/run_tests.py` (or `--throughput`) as a subprocess; accepts `{ variant, client, kind }` body; returns `{ id, status: "running" }` (HTTP 202) |
+| `/api/run/[id]`   | GET    | Returns the current status, accumulated stdout/stderr output, and result file path for a run                                                                   |
 
 Run state is held in-process memory — it resets when the Next.js server restarts.
 
@@ -1257,11 +1781,11 @@ Run state is held in-process memory — it resets when the Next.js server restar
 
 Valid values:
 
-| Field | Values |
-| ----- | ------ |
+| Field     | Values                   |
+| --------- | ------------------------ |
 | `variant` | `V1` `V2` `V3` `V4` `V5` |
-| `client` | `python` `ts` `dotnet` |
-| `kind` | `lifecycle` `throughput` |
+| `client`  | `python` `ts` `dotnet`   |
+| `kind`    | `lifecycle` `throughput` |
 
 The API maps `variant` to its platform (`evm`/`solana`) and environment
 (`sepolia`/`solana-devnet`) automatically, and sets `VARIANT`, `CLIENT`, and
@@ -1304,7 +1828,7 @@ Chart components share constants from `dashboard/lib/chart-constants.ts`:
 | Anchor CLI              | 0.32.1          | Build, test, deploy (contracts/solana/)                |
 | anchor-lang             | 0.32.1          | Solana program framework                               |
 | anchor-spl              | 0.32.1          | SPL Token CPI helpers                                  |
-| @coral-xyz/anchor (TS)  | 0.32.1          | TS client Anchor SDK (clients/ts/)                 |
+| @coral-xyz/anchor (TS)  | 0.32.1          | TS client Anchor SDK (clients/ts/)                     |
 | @solana/spl-token (TS)  | 0.3.11          | SPL token helpers                                      |
 | @solana/web3.js         | 1.95.4          | Solana RPC and transaction building                    |
 | viem                    | 2.21.x          | EVM client RPC and contract interaction                |

@@ -27,10 +27,16 @@ SOLANA_KEYPAIR_PATH: str = os.getenv(
 # ---------------------------------------------------------------------------
 # Program and campaign addresses
 # ---------------------------------------------------------------------------
-SOLANA_PROGRAM_ID: str = os.getenv(
-    "SOLANA_PROGRAM_ID",
-    "BiVZkwVjTU1vBKa7TRQFU6w97NGBSK5xvuNdAaDtPHWU",
+SOLANA_PROGRAM_ID_V4: str = os.getenv(
+    "SOLANA_PROGRAM_ID_V4",
+    "4agCFfWuoR6MPGXeAb6cXQTHcWmxvqD29uanxJd4bkXv",
 )
+SOLANA_PROGRAM_ID_V5: str = os.getenv(
+    "SOLANA_PROGRAM_ID_V5",
+    "AtaYCBbNJJwwwckTouZ2G4ZgrzPNT2JtZF1yL7zUxQpC",
+)
+# Alias for code that reads SOLANA_PROGRAM_ID directly.
+SOLANA_PROGRAM_ID: str = SOLANA_PROGRAM_ID_V4
 
 SOLANA_CAMPAIGN_PDA: str = os.getenv("SOLANA_CAMPAIGN_ADDRESS", "")
 SOLANA_PAYMENT_MINT: str = os.getenv("SOLANA_PAYMENT_MINT", "")
@@ -57,10 +63,10 @@ SOLANA_PY_IDL_PATH: pathlib.Path = pathlib.Path(
 
 # Variant -> (py_idl_path, program_id)
 SOLANA_VARIANT_ARTIFACTS: dict[str, tuple[pathlib.Path, str]] = {
-    "V4": (SOLANA_PY_IDL_PATH, SOLANA_PROGRAM_ID),
+    "V4": (SOLANA_PY_IDL_PATH, SOLANA_PROGRAM_ID_V4),
     "V5": (
         REPO_ROOT / "contracts" / "solana" / "target" / "idl" / "crowdfunding_token2022.python.json",
-        os.getenv("SOLANA_PROGRAM_ID_V5", "46xPA3ukhGDwk1w9ZZGCmkmVWuRR1nT9Z3QsPrDNxRyy"),
+        SOLANA_PROGRAM_ID_V5,
     ),
 }
 

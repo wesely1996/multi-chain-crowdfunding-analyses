@@ -9,7 +9,7 @@ use instructions::*;
 // WHY: placeholder ID — replaced by `anchor build` on first compile.
 // Run `anchor keys list` after build and update both this macro and
 // Anchor.toml [programs.localnet].
-declare_id!("BiVZkwVjTU1vBKa7TRQFU6w97NGBSK5xvuNdAaDtPHWU");
+declare_id!("4agCFfWuoR6MPGXeAb6cXQTHcWmxvqD29uanxJd4bkXv");
 
 #[program]
 pub mod crowdfunding {

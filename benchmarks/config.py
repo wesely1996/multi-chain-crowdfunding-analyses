@@ -136,18 +136,25 @@ SOLANA_WALLET_PATH: str = os.getenv(
     str(pathlib.Path.home() / ".config" / "solana" / "id.json"),
 )
 
-# Solana program ID — must match `declare_id!` in lib.rs and Anchor.toml
-SOLANA_PROGRAM_ID: str = os.getenv(
-    "SOLANA_PROGRAM_ID",
-    "BiVZkwVjTU1vBKa7TRQFU6w97NGBSK5xvuNdAaDtPHWU",
+# Solana program IDs — must match `declare_id!` in lib.rs and Anchor.toml
+# Override per-variant with SOLANA_PROGRAM_ID_V4 / SOLANA_PROGRAM_ID_V5 env vars.
+SOLANA_PROGRAM_ID_V4: str = os.getenv(
+    "SOLANA_PROGRAM_ID_V4",
+    "4agCFfWuoR6MPGXeAb6cXQTHcWmxvqD29uanxJd4bkXv",
 )
+SOLANA_PROGRAM_ID_V5: str = os.getenv(
+    "SOLANA_PROGRAM_ID_V5",
+    "AtaYCBbNJJwwwckTouZ2G4ZgrzPNT2JtZF1yL7zUxQpC",
+)
+# Alias kept for code that still reads SOLANA_PROGRAM_ID directly (e.g. throughput script).
+SOLANA_PROGRAM_ID: str = SOLANA_PROGRAM_ID_V4
 
 # Variant → (py_idl_path, program_id)
 SOLANA_VARIANT_ARTIFACTS: dict[str, tuple[pathlib.Path, str]] = {
-    "V4": (SOLANA_PY_IDL_PATH, SOLANA_PROGRAM_ID),
+    "V4": (SOLANA_PY_IDL_PATH, SOLANA_PROGRAM_ID_V4),
     "V5": (
         REPO_ROOT / "contracts" / "solana" / "target" / "idl" / "crowdfunding_token2022.python.json",
-        "46xPA3ukhGDwk1w9ZZGCmkmVWuRR1nT9Z3QsPrDNxRyy",
+        SOLANA_PROGRAM_ID_V5,
     ),
 }
 

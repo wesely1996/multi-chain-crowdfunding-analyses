@@ -222,8 +222,8 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
     base_env = {**os.environ}
     base_env.update({
         "RPC_URL": config.EVM_RPC_URL,
-        "FACTORY_ADDRESS": deploy_json["factory"],
-        "CAMPAIGN_ADDRESS": deploy_json["campaign"],
+        f"FACTORY_ADDRESS_{variant}": deploy_json["factory"],
+        f"CAMPAIGN_ADDRESS_{variant}": deploy_json["campaign"],
         "PAYMENT_TOKEN_ADDRESS": deploy_json["mockERC20"],
         "CHAIN_ID": str(deploy_json.get("chain_id", 31337)),
         "VARIANT": variant,
@@ -371,7 +371,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
         print(f"[{client}] Refund campaign: {refund_campaign_addr}")
 
         # Update CAMPAIGN_ADDRESS for refund ops
-        base_env["CAMPAIGN_ADDRESS"] = refund_campaign_addr
+        base_env[f"CAMPAIGN_ADDRESS_{variant}"] = refund_campaign_addr
 
         # Advance time past deadline for refund campaign (need to deploy fresh)
         n_refund = 5
@@ -628,7 +628,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         base_env = {
             **os.environ,
             "SOLANA_RPC_URL": config.SOLANA_RPC_URL,
-            "SOLANA_PROGRAM_ID": program_id_str,
+            f"SOLANA_PROGRAM_ID_{variant}": program_id_str,
             "SOLANA_PAYMENT_MINT": str(payment_mint_pubkey),
             "SOLANA_CAMPAIGN_ADDRESS": campaign_addr,
             "SOLANA_CAMPAIGN_ID": str(campaign_id_val),
