@@ -268,7 +268,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[340px] overflow-y-auto pr-1">
                   {filtered.map((r) => (
                     <ResultCard
-                      key={`${r.variant}_${r.client}_${r.environment}`}
+                      key={`${r.variant}_${r.client}_${r.environment}_${r.kind ?? r.timestamp_utc}`}
                       result={r}
                       isSelected={selected === r}
                       onClick={() => setSelected(r)}

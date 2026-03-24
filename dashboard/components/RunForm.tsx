@@ -6,8 +6,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import type { RunStatus } from "@/lib/types";
 
 type Variant = "V1" | "V2" | "V3" | "V4" | "V5";
-type Client = "python" | "ts" | "dotnet";
+type Client = "python" | "test-script" | "ts" | "dotnet";
 type Kind = "lifecycle" | "throughput";
+type EvmEnv = "hardhat-localnet" | "sepolia";
+type SolanaEnv = "solana-localnet" | "solana-devnet";
+
+const EVM_ENVS: EvmEnv[] = ["hardhat-localnet", "sepolia"];
+const SOLANA_ENVS: SolanaEnv[] = ["solana-localnet", "solana-devnet"];
 
 const VARIANTS: { value: Variant; label: string }[] = [
   { value: "V1", label: "V1 — ERC-20 (EVM)" },
@@ -17,15 +22,15 @@ const VARIANTS: { value: Variant; label: string }[] = [
   { value: "V5", label: "V5 — Token-2022 (Solana)" },
 ];
 
-const CLIENTS: Client[] = ["python", "ts", "dotnet"];
+const CLIENTS: { value: Client; label: string }[] = [
+  { value: "python",      label: "python" },
+  { value: "test-script", label: "test script" },
+  { value: "ts",          label: "ts" },
+  { value: "dotnet",      label: "dotnet" },
+];
 const KINDS: Kind[] = ["lifecycle", "throughput"];
 
 const POLL_INTERVAL_MS = 2000;
-
-function deriveEnvironment(variant: Variant): string {
-  if (variant === "V4" || variant === "V5") return "solana-devnet";
-  return "sepolia";
-}
 
 const SELECT_CLASS =
   "w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 " +
@@ -37,7 +42,10 @@ export function RunForm() {
   const [variant, setVariant] = useState<Variant>("V1");
   const [client, setClient] = useState<Client>("python");
   const [kind, setKind] = useState<Kind>("lifecycle");
+  const [evmEnv, setEvmEnv] = useState<EvmEnv>("hardhat-localnet");
+  const [solanaEnv, setSolanaEnv] = useState<SolanaEnv>("solana-devnet");
 
+  const [isWindows, setIsWindows] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [status, setStatus] = useState<RunStatus>("idle");
   const [output, setOutput] = useState("");
@@ -46,8 +54,15 @@ export function RunForm() {
 
   const logRef = useRef<HTMLPreElement>(null);
 
-  const environment = deriveEnvironment(variant);
   const isRunning = status === "running";
+  const isSolana = variant === "V4" || variant === "V5";
+  const environment = isSolana ? solanaEnv : evmEnv;
+  const solanaWindowsBlocked = isWindows && isSolana;
+
+  // Detect Windows platform
+  useEffect(() => {
+    setIsWindows(navigator.userAgent.toLowerCase().includes("win"));
+  }, []);
 
   // Auto-scroll output to bottom when it updates
   useEffect(() => {
@@ -88,7 +103,7 @@ export function RunForm() {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ variant, client, kind }),
+        body: JSON.stringify({ variant, client, kind, environment }),
       });
       const data: { id?: string; error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to start run");
@@ -147,9 +162,9 @@ export function RunForm() {
             className={SELECT_CLASS}
             disabled={isRunning}
           >
-            {CLIENTS.map((c) => (
-              <option key={c} value={c}>
-                {c}
+            {CLIENTS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>
@@ -179,18 +194,45 @@ export function RunForm() {
           </div>
         </div>
 
-        {/* Environment (derived, read-only) */}
+        {/* Environment */}
         <div>
-          <span className={LABEL_CLASS}>Environment (derived)</span>
-          <div className="px-3 py-1.5 text-sm text-gray-400 bg-gray-900 border border-gray-800 rounded font-mono">
-            {environment}
-          </div>
+          <label htmlFor="run-env" className={LABEL_CLASS}>Environment</label>
+          {isSolana ? (
+            <select
+              id="run-env"
+              value={solanaEnv}
+              onChange={(e) => setSolanaEnv(e.target.value as SolanaEnv)}
+              className={SELECT_CLASS}
+              disabled={isRunning}
+            >
+              {SOLANA_ENVS.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          ) : (
+            <select
+              id="run-env"
+              value={evmEnv}
+              onChange={(e) => setEvmEnv(e.target.value as EvmEnv)}
+              className={SELECT_CLASS}
+              disabled={isRunning}
+            >
+              {EVM_ENVS.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          )}
         </div>
+
+        {/* Windows × Solana block (all clients) */}
+        {solanaWindowsBlocked && (
+          <p className="text-xs text-orange-400 bg-orange-900/20 border border-orange-800 rounded px-3 py-2">
+            Solana benchmarks cannot run on Windows — the Python harness imports{" "}
+            <span className="font-mono">anchorpy</span> unconditionally, which requires the Solana
+            toolchain (WSL-only). Run Solana benchmarks from a WSL terminal.
+          </p>
+        )}
 
         {/* Submit */}
         <button
           type="submit"
-          disabled={isRunning}
+          disabled={isRunning || solanaWindowsBlocked}
           className="w-full rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white transition-colors"
         >
           {isRunning ? "Running…" : "Start Run"}

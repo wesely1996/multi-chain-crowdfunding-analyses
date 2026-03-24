@@ -413,10 +413,14 @@ def main() -> None:
     env_name = args.env or config.BENCHMARK_ENV or config._infer_env(variant)
 
     if args.platform == "evm":
-        if not args.deploy_json:
-            sys.exit("[error] --deploy-json is required for --platform evm.")
-        with open(args.deploy_json) as fh:
-            deploy_json = json.load(fh)
+        if args.deploy_json:
+            with open(args.deploy_json) as fh:
+                deploy_json = json.load(fh)
+        else:
+            print(f"[info] --deploy-json not provided; auto-deploying variant={variant} env={env_name}...",
+                  file=sys.stderr)
+            from clients.python.evm.deploy import deploy as _evm_deploy
+            deploy_json = _evm_deploy(variant, env_name)
         result = throughput_evm_client(args.client, variant, env_name, deploy_json)
     else:
         result = throughput_solana_client(args.client, variant, env_name)

@@ -81,6 +81,8 @@ def _run_subprocess(cmd: list[str], env: dict, cwd: str, timeout: int = 120) -> 
     Run a subprocess, capture stdout, parse JSON, return (parsed_output, process_elapsed_ms).
     Exits with an error message if the subprocess fails or stdout is not valid JSON.
     """
+    # On Windows, executables like npm/npx/dotnet are .cmd shims and require shell=True.
+    use_shell = sys.platform == "win32"
     t0 = time.perf_counter_ns()
     try:
         result = subprocess.run(
@@ -90,6 +92,7 @@ def _run_subprocess(cmd: list[str], env: dict, cwd: str, timeout: int = 120) -> 
             env=env,
             cwd=cwd,
             timeout=timeout,
+            shell=use_shell,
         )
     except subprocess.TimeoutExpired:
         sys.exit(f"[client] Timeout after {timeout}s running: {' '.join(cmd)}")
@@ -123,7 +126,7 @@ def _run_subprocess(cmd: list[str], env: dict, cwd: str, timeout: int = 120) -> 
 def _run_ts(operation: str, extra_args: list[str], env: dict, ts_dir: str, solana: bool = False) -> tuple[dict, int]:
     """Run a ts-evm npm script and return (TxOutput, process_elapsed_ms)."""
     npm_script = f"sol:{operation}" if solana else operation
-    cmd = ["npm", "run", npm_script, "--", *extra_args]
+    cmd = ["npm", "run", "--silent", npm_script, "--", *extra_args]
     return _run_subprocess(cmd, env, ts_dir)
 
 
@@ -176,7 +179,6 @@ def _evm_setup_mint_tokens(deploy_json: dict) -> None:
 
     def _send(tx: dict, signer) -> None:
         tx.setdefault("gas", 200_000)
-        tx.setdefault("gasPrice", w3.eth.gas_price)
         tx["nonce"] = w3.eth.get_transaction_count(signer.address)
         signed = signer.sign_transaction(tx)
         w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(signed.rawTransaction))
@@ -888,11 +890,14 @@ def main() -> None:
     env_name = args.env or config.BENCHMARK_ENV or config._infer_env(variant)
 
     if args.platform == "evm":
-        if not args.deploy_json:
-            sys.exit("[error] --deploy-json is required for --platform evm.\n"
-                     "Run: python benchmarks/deploy_evm.py --variant V1 > /tmp/evm_deploy.json")
-        with open(args.deploy_json) as fh:
-            deploy_json = json.load(fh)
+        if args.deploy_json:
+            with open(args.deploy_json) as fh:
+                deploy_json = json.load(fh)
+        else:
+            print(f"[info] --deploy-json not provided; auto-deploying variant={variant} env={env_name}...",
+                  file=sys.stderr)
+            from clients.python.evm.deploy import deploy as _evm_deploy
+            deploy_json = _evm_deploy(variant, env_name)
         result = run_evm_lifecycle(args.client, variant, env_name, deploy_json)
     else:
         result = run_solana_lifecycle(args.client, variant, env_name)

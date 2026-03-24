@@ -20,6 +20,83 @@ public static class InstructionBuilder
         return hash[..8];
     }
 
+    /// <summary>
+    /// Builds InitializeMint for SPL Token or Token-2022 (identical binary format, different program ID).
+    /// </summary>
+    public static TransactionInstruction InitializeMint(
+        PublicKey mint, byte decimals, PublicKey mintAuthority, PublicKey? freezeAuthority = null,
+        PublicKey? tokenProgram = null)
+    {
+        var tokenProg = tokenProgram ?? DefaultTokenProgram;
+        var data = new byte[67];
+        data[0] = 0; // InitializeMint instruction
+        data[1] = decimals;
+        mintAuthority.KeyBytes.CopyTo(data, 2);
+        if (freezeAuthority != null) { data[34] = 1; freezeAuthority.KeyBytes.CopyTo(data, 35); }
+        // else data[34] = 0 → COption::None
+        return new TransactionInstruction
+        {
+            ProgramId = tokenProg.KeyBytes,
+            Keys = new List<AccountMeta>
+            {
+                AccountMeta.Writable(mint, false),
+                AccountMeta.ReadOnly(RentSysvar, false),
+            },
+            Data = data,
+        };
+    }
+
+    /// <summary>
+    /// Builds MintTo for SPL Token or Token-2022 (identical binary format, different program ID).
+    /// </summary>
+    public static TransactionInstruction MintTo(
+        PublicKey mint, PublicKey destination, ulong amount, PublicKey authority,
+        PublicKey? tokenProgram = null)
+    {
+        var tokenProg = tokenProgram ?? DefaultTokenProgram;
+        var data = new byte[9];
+        data[0] = 7; // MintTo instruction
+        BitConverter.GetBytes(amount).CopyTo(data, 1);
+        return new TransactionInstruction
+        {
+            ProgramId = tokenProg.KeyBytes,
+            Keys = new List<AccountMeta>
+            {
+                AccountMeta.Writable(mint, false),
+                AccountMeta.Writable(destination, false),
+                AccountMeta.ReadOnly(authority, true),
+            },
+            Data = data,
+        };
+    }
+
+    /// <summary>
+    /// Builds CreateAssociatedTokenAccount for SPL Token or Token-2022.
+    /// Derives the ATA address using the correct token program ID as a seed.
+    /// </summary>
+    public static TransactionInstruction CreateAta(
+        PublicKey payer, PublicKey owner, PublicKey mint, PublicKey? tokenProgram = null)
+    {
+        var tokenProg = tokenProgram ?? DefaultTokenProgram;
+        PublicKey.TryFindProgramAddress(
+            new[] { owner.KeyBytes, tokenProg.KeyBytes, mint.KeyBytes },
+            AssociatedTokenProgram, out var ata, out _);
+        return new TransactionInstruction
+        {
+            ProgramId = AssociatedTokenProgram.KeyBytes,
+            Keys = new List<AccountMeta>
+            {
+                AccountMeta.Writable(payer, true),
+                AccountMeta.Writable(ata, false),
+                AccountMeta.ReadOnly(owner, false),
+                AccountMeta.ReadOnly(mint, false),
+                AccountMeta.ReadOnly(SystemProgram, false),
+                AccountMeta.ReadOnly(tokenProg, false),
+            },
+            Data = Array.Empty<byte>(),
+        };
+    }
+
     public static TransactionInstruction InitializeCampaign(
         PublicKey programId, PublicKey creator, PublicKey campaign,
         PublicKey paymentMint, PublicKey vault, PublicKey receiptMint,

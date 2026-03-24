@@ -3,7 +3,7 @@ evm/create_campaign.py -- Create a new crowdfunding campaign via the Factory.
 
 Usage:
     python -m clients.python evm:create_campaign --variant V1
-    python -m clients.python evm:create_campaign --variant V3 --soft-cap 100000000 --hard-cap 500000000
+    python -m clients.python evm:create_campaign --variant V3 --soft-cap 100 --hard-cap 500
 """
 
 from __future__ import annotations
@@ -83,16 +83,16 @@ def create_campaign(
 def main(args=None) -> None:
     parser = argparse.ArgumentParser(description="Create a crowdfunding campaign.")
     parser.add_argument("--variant", default=evm_config.VARIANT)
-    parser.add_argument("--soft-cap", type=int, default=evm_config.SOFT_CAP)
-    parser.add_argument("--hard-cap", type=int, default=evm_config.HARD_CAP)
+    parser.add_argument("--soft-cap", type=float, default=100.0, help="Soft cap in USDC")
+    parser.add_argument("--hard-cap", type=float, default=500.0, help="Hard cap in USDC")
     parser.add_argument("--deadline-days", type=int, default=evm_config.DEADLINE_DAYS)
     parsed = parser.parse_args(args)
 
     try:
         output = create_campaign(
             variant=parsed.variant,
-            soft_cap=parsed.soft_cap,
-            hard_cap=parsed.hard_cap,
+            soft_cap=int(round(parsed.soft_cap * 10 ** evm_config.DECIMALS)),
+            hard_cap=int(round(parsed.hard_cap * 10 ** evm_config.DECIMALS)),
             deadline_days=parsed.deadline_days,
             milestones=evm_config.MILESTONES,
         )

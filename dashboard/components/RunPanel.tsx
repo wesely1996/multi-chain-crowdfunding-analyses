@@ -8,6 +8,17 @@ const VARIANTS = ["V1", "V2", "V3", "V4", "V5"] as const;
 const CLIENTS = ["python", "ts", "dotnet"] as const;
 const KINDS = ["lifecycle", "throughput"] as const;
 
+const EVM_ENVS = ["hardhat-localnet", "sepolia"] as const;
+const SOLANA_ENVS = ["solana-localnet", "solana-devnet"] as const;
+
+function defaultEnv(variant: string): string {
+  return ["V4", "V5"].includes(variant) ? "solana-localnet" : "hardhat-localnet";
+}
+
+function envsForVariant(variant: string): readonly string[] {
+  return ["V4", "V5"].includes(variant) ? SOLANA_ENVS : EVM_ENVS;
+}
+
 const POLL_INTERVAL_MS = 1500;
 
 interface Props {
@@ -24,6 +35,7 @@ export default function RunPanel({ onRunComplete }: Props) {
   const [variant, setVariant] = useState("V1");
   const [client, setClient] = useState("python");
   const [kind, setKind] = useState("lifecycle");
+  const [environment, setEnvironment] = useState(defaultEnv("V1"));
 
   const [runId, setRunId] = useState<string | null>(null);
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -69,7 +81,7 @@ export default function RunPanel({ onRunComplete }: Props) {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ variant, client, kind }),
+        body: JSON.stringify({ variant, client, kind, environment }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to start run");
@@ -99,7 +111,10 @@ export default function RunPanel({ onRunComplete }: Props) {
           <select
             id="run-variant"
             value={variant}
-            onChange={(e) => setVariant(e.target.value)}
+            onChange={(e) => {
+              setVariant(e.target.value);
+              setEnvironment(defaultEnv(e.target.value));
+            }}
             className={SELECT_CLASS}
             disabled={isRunning}
           >
@@ -125,6 +140,25 @@ export default function RunPanel({ onRunComplete }: Props) {
             {CLIENTS.map((c) => (
               <option key={c} value={c}>
                 {c}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="run-env" className={LABEL_CLASS}>
+            Environment
+          </label>
+          <select
+            id="run-env"
+            value={environment}
+            onChange={(e) => setEnvironment(e.target.value)}
+            className={SELECT_CLASS}
+            disabled={isRunning}
+          >
+            {envsForVariant(variant).map((env) => (
+              <option key={env} value={env}>
+                {env}
               </option>
             ))}
           </select>

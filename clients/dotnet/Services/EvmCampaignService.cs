@@ -94,6 +94,13 @@ public class EvmCampaignService
         _paymentTokenAddress = config.PaymentTokenAddress;
     }
 
+    public async Task<long> GetNodeTimestamp()
+    {
+        var block = await _web3.Eth.Blocks.GetBlockWithTransactionsByNumber.SendRequestAsync(
+            Nethereum.RPC.Eth.DTOs.BlockParameter.CreateLatest());
+        return (long)block.Timestamp.Value;
+    }
+
     private string GetFactoryAbi() => _config.Variant switch
     {
         "V2" => CrowdfundingFactory4626Abi.ABI,
@@ -229,8 +236,26 @@ public class EvmCampaignService
         };
     }
 
-    public async Task<TxOutput> Finalize()
+    public async Task AdvanceTime(long seconds)
     {
+        await _web3.Client.SendRequestAsync<object>(
+            new Nethereum.JsonRpc.Client.RpcRequest(1, "evm_increaseTime", seconds));
+        await _web3.Client.SendRequestAsync<object>(
+            new Nethereum.JsonRpc.Client.RpcRequest(2, "evm_mine"));
+    }
+
+    public async Task<TxOutput> Finalize(bool advanceTime = false)
+    {
+        if (advanceTime)
+        {
+            var campaign2 = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
+            var deadline = await campaign2.GetFunction("deadline").CallAsync<BigInteger>();
+            var nodeNow = await GetNodeTimestamp();
+            var toAdvance = (long)(deadline - nodeNow) + 2;
+            if (toAdvance > 0)
+                await AdvanceTime(toAdvance);
+        }
+
         var sw = Stopwatch.StartNew();
         var campaign = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
         var txHash = await campaign.GetFunction("finalize")

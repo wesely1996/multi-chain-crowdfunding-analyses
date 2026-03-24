@@ -5,7 +5,7 @@ V4: SPL Token program
 V5: Token-2022 program (same logic, different program ID)
 
 Usage:
-    python -m clients.python sol:contribute --amount 10000000
+    python -m clients.python sol:contribute --amount 10       # 10 USDC
 """
 
 from __future__ import annotations
@@ -108,12 +108,12 @@ async def _contribute(variant: str, amount: int) -> TxOutput:
 def main(args=None) -> None:
     parser = argparse.ArgumentParser(description="Contribute to a Solana campaign.")
     parser.add_argument("--variant", default=sol_config.SOLANA_VARIANT)
-    parser.add_argument("--amount", type=int, default=sol_config.CONTRIB_AMOUNT,
-                        help="Contribution amount in token base units")
+    parser.add_argument("--amount", type=float, default=10.0,
+                        help="Contribution amount in USDC")
     parsed = parser.parse_args(args)
 
     try:
-        output = asyncio.run(_contribute(parsed.variant, parsed.amount))
+        output = asyncio.run(_contribute(parsed.variant, int(round(parsed.amount * 10 ** sol_config.DECIMALS))))
         print_result(output)
     except Exception as exc:
         print_error("contribute", exc, chain="solana")

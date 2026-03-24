@@ -5,7 +5,7 @@ using CrowdfundingClient.Helpers;
 using CrowdfundingClient.Models;
 using CrowdfundingClient.Services;
 
-DotEnv.Load(options: new DotEnvOptions(envFilePaths: new[] { "../../.env" }));
+DotEnv.Load(options: new DotEnvOptions(envFilePaths: new[] { "../../.env" }, overwriteExistingVars: false));
 
 if (args.Length == 0)
 {
@@ -14,6 +14,8 @@ if (args.Length == 0)
     Console.Error.WriteLine("Solana: sol:create-campaign, sol:contribute, sol:finalize, sol:withdraw, sol:refund, sol:status");
     Environment.Exit(1);
 }
+
+const long USDC = 1_000_000; // 6 decimals
 
 var command = args[0];
 
@@ -27,20 +29,22 @@ try
 
         result = command switch
         {
+            "sol:create-mint" => await solService.CreateMint(),
+
             "sol:create-campaign" => await solService.CreateCampaign(
-                ulong.Parse(ArgParser.ParseArg(args, "--soft-cap", "100000000")),
-                ulong.Parse(ArgParser.ParseArg(args, "--hard-cap", "500000000")),
-                DateTimeOffset.UtcNow.ToUnixTimeSeconds() +
-                    long.Parse(ArgParser.ParseArg(args, "--deadline-seconds", "1800")),
+                (ulong)(double.Parse(ArgParser.ParseArg(args, "--soft-cap", "100")) * USDC),
+                (ulong)(double.Parse(ArgParser.ParseArg(args, "--hard-cap", "500")) * USDC),
+                long.Parse(ArgParser.ParseArg(args, "--deadline-seconds", "1800")),
                 ArgParser.ParseMilestoneBytes(args, "--milestones", "30,30,40"),
                 ArgParser.ParseULongOrNull(args, "--campaign-id")),
 
             "sol:contribute" => await solService.Contribute(
-                ulong.Parse(ArgParser.ParseArg(args, "--amount", "10000000")),
+                (ulong)(double.Parse(ArgParser.ParseArg(args, "--amount", "10")) * USDC),
                 ArgParser.ParseArgOrNull(args, "--campaign")),
 
             "sol:finalize" => await solService.Finalize(
-                ArgParser.ParseArgOrNull(args, "--campaign")),
+                ArgParser.ParseArgOrNull(args, "--campaign"),
+                args.Contains("--advance-time")),
 
             "sol:withdraw" => await solService.Withdraw(
                 ArgParser.ParseArgOrNull(args, "--campaign")),
@@ -59,23 +63,26 @@ try
     {
         var evmService = new EvmCampaignService(EvmConfig.FromEnvironment());
 
+        // Use node's block timestamp — Hardhat time drifts after evm_increaseTime calls
+        var nodeNow = command == "create-campaign" ? await evmService.GetNodeTimestamp() : 0;
+
         result = command switch
         {
             "create-campaign" => await evmService.CreateCampaign(
-                ArgParser.ParseBigInt(args, "--soft-cap", "100000000"),
-                ArgParser.ParseBigInt(args, "--hard-cap", "500000000"),
+                new BigInteger((long)(double.Parse(ArgParser.ParseArg(args, "--soft-cap", "100")) * USDC)),
+                new BigInteger((long)(double.Parse(ArgParser.ParseArg(args, "--hard-cap", "500")) * USDC)),
                 BigInteger.Parse(
-                    (DateTimeOffset.UtcNow.ToUnixTimeSeconds() +
+                    (nodeNow +
                      long.Parse(ArgParser.ParseArg(args, "--deadline-days", "30")) * 86400).ToString()),
                 ArgParser.ParseMilestones(args, "--milestones", "30,30,40"),
                 ArgParser.ParseArg(args, "--token-name", "Campaign Receipt Token"),
                 ArgParser.ParseArg(args, "--token-symbol", "CRT")),
 
             "contribute" => await evmService.Contribute(
-                ArgParser.ParseBigInt(args, "--amount", "10000000"),
+                new BigInteger((long)(double.Parse(ArgParser.ParseArg(args, "--amount", "10")) * USDC)),
                 ArgParser.ParseBigIntOrNull(args, "--tier-id")),
 
-            "finalize" => await evmService.Finalize(),
+            "finalize" => await evmService.Finalize(args.Contains("--advance-time")),
             "withdraw" => await evmService.Withdraw(),
             "refund" => await evmService.Refund(
                 ArgParser.ParseBigIntOrNull(args, "--tier-id")),

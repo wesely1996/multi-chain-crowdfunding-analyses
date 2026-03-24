@@ -14,8 +14,8 @@ routes to clients.python.evm.*.
 
 Examples:
     python -m clients.python evm:deploy --variant V1
-    python -m clients.python evm:contribute --amount 10000000
-    python -m clients.python sol:contribute --amount 10000000
+    python -m clients.python evm:contribute --amount 10
+    python -m clients.python sol:contribute --amount 10
     python -m clients.python status                          # defaults to evm
 """
 
@@ -34,6 +34,7 @@ OPERATIONS = {
     "refund":          ("clients.python.evm.refund",          "clients.python.solana.refund"),
     "status":          ("clients.python.evm.status",          "clients.python.solana.status"),
     "idl_convert":     (None,                                  "clients.python.solana.idl_convert"),
+    "create_mint":     (None,                                  "clients.python.solana.create_mint"),
 }
 
 
@@ -58,8 +59,8 @@ def _print_help() -> None:
     print()
     print("Examples:")
     print("    python -m clients.python evm:deploy --variant V1")
-    print("    python -m clients.python evm:contribute --amount 10000000")
-    print("    python -m clients.python sol:contribute --amount 10000000")
+    print("    python -m clients.python evm:contribute --amount 10")
+    print("    python -m clients.python sol:contribute --amount 10")
     print("    python -m clients.python evm:status")
 
 

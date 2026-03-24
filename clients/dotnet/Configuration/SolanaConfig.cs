@@ -15,7 +15,8 @@ public record SolanaConfig(
         var variant = Env("VARIANT", "V4");
         return new(
             RpcUrl          : Env("SOLANA_RPC_URL", "http://127.0.0.1:8899"),
-            KeypairPath     : Env("SOLANA_KEYPAIR_PATH"),
+            KeypairPath     : ExpandPath(Env("SOLANA_KEYPAIR_PATH",
+                                 Path.Combine("~", ".config", "solana", "id.json"))),
             ProgramId       : Env($"SOLANA_PROGRAM_ID_{variant}"),
             PaymentMint     : Env("SOLANA_PAYMENT_MINT"),
             CampaignAddress : Env("SOLANA_CAMPAIGN_ADDRESS"),
@@ -26,4 +27,10 @@ public record SolanaConfig(
 
     private static string Env(string n, string d = "") =>
         Environment.GetEnvironmentVariable(n) ?? d;
+
+    private static string ExpandPath(string path) =>
+        path.StartsWith("~")
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                           path[2..])
+            : path;
 }

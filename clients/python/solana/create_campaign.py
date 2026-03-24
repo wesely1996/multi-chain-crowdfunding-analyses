@@ -112,16 +112,16 @@ async def _create_campaign(
 def main(args=None) -> None:
     parser = argparse.ArgumentParser(description="Initialize a Solana crowdfunding campaign.")
     parser.add_argument("--variant", default=sol_config.SOLANA_VARIANT)
-    parser.add_argument("--soft-cap", type=int, default=sol_config.SOFT_CAP)
-    parser.add_argument("--hard-cap", type=int, default=sol_config.HARD_CAP)
+    parser.add_argument("--soft-cap", type=float, default=100.0, help="Soft cap in USDC")
+    parser.add_argument("--hard-cap", type=float, default=500.0, help="Hard cap in USDC")
     parser.add_argument("--deadline-seconds", type=int, default=sol_config.DEADLINE_DAYS * 86400)
     parsed = parser.parse_args(args)
 
     try:
         output = asyncio.run(_create_campaign(
             variant=parsed.variant,
-            soft_cap=parsed.soft_cap,
-            hard_cap=parsed.hard_cap,
+            soft_cap=int(round(parsed.soft_cap * 10 ** sol_config.DECIMALS)),
+            hard_cap=int(round(parsed.hard_cap * 10 ** sol_config.DECIMALS)),
             deadline_seconds=parsed.deadline_seconds,
             milestones=sol_config.MILESTONES,
         ))

@@ -39,7 +39,11 @@ export default function CompareChart({ results }: Props) {
   }));
 
   const costData = results
-    .map((r) => ({ name: buildLabel(r), cost: costPerTps(r), variant: r.variant }))
+    .map((r) => ({
+      name: buildLabel(r),
+      cost: costPerTps(r),
+      variant: r.variant,
+    }))
     .filter((d) => d.cost !== null);
 
   return (
@@ -48,13 +52,22 @@ export default function CompareChart({ results }: Props) {
         Comparative Analysis
       </h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-1 gap-4">
         {/* TPS chart */}
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
-          <p className="text-xs text-gray-400 mb-3 font-medium">Throughput (TPS)</p>
+          <p className="text-xs text-gray-400 mb-3 font-medium">
+            Throughput (TPS)
+          </p>
           <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={tpsData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+            <BarChart
+              data={tpsData}
+              margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+            >
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#1f2937"
+                vertical={false}
+              />
               <XAxis dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} />
               <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} unit=" TPS" />
               <Tooltip
@@ -65,7 +78,10 @@ export default function CompareChart({ results }: Props) {
               />
               <Bar dataKey="tps" radius={[3, 3, 0, 0]}>
                 {tpsData.map((entry, i) => (
-                  <Cell key={i} fill={VARIANT_COLORS[entry.variant] ?? "#6b7280"} />
+                  <Cell
+                    key={i}
+                    fill={VARIANT_COLORS[entry.variant] ?? "#6b7280"}
+                  />
                 ))}
               </Bar>
             </BarChart>
@@ -78,21 +94,39 @@ export default function CompareChart({ results }: Props) {
             <p className="text-xs text-gray-400 mb-1 font-medium">
               Cost-per-TPS (fee units / TPS)
             </p>
-            <p className="text-xs text-gray-600 mb-3">Lower = more cost-efficient</p>
+            <p className="text-xs text-gray-600 mb-3">
+              Lower = more cost-efficient
+            </p>
             <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={costData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                <XAxis dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} />
+              <BarChart
+                data={costData}
+                margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#1f2937"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fill: "#9ca3af", fontSize: 10 }}
+                />
                 <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} />
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE}
                   labelStyle={{ color: "#e5e7eb" }}
                   itemStyle={{ color: "#9ca3af" }}
-                  formatter={(v) => [Number(v).toLocaleString(), "fee units / TPS"]}
+                  formatter={(v) => [
+                    Number(v).toLocaleString(),
+                    "fee units / TPS",
+                  ]}
                 />
                 <Bar dataKey="cost" radius={[3, 3, 0, 0]}>
                   {costData.map((entry, i) => (
-                    <Cell key={i} fill={VARIANT_COLORS[entry.variant] ?? "#6b7280"} />
+                    <Cell
+                      key={i}
+                      fill={VARIANT_COLORS[entry.variant] ?? "#6b7280"}
+                    />
                   ))}
                 </Bar>
               </BarChart>

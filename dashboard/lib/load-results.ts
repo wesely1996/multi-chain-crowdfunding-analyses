@@ -62,7 +62,7 @@ export function loadResults(resultsDir = RESULTS_DIR): BenchmarkFile[] {
     const key = groupKey(file, kind);
     const existing = groups.get(key);
     if (!existing || file.timestamp_utc > existing.timestamp_utc) {
-      groups.set(key, file);
+      groups.set(key, { ...file, kind });
     }
   }
 

@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Linq;
+using Solnet.Programs; // SystemProgram.CreateAccount, TokenProgram.MintAccountDataSize
 using Solnet.Rpc;
+using Solnet.Rpc.Types;
 using Solnet.Wallet;
 using CrowdfundingClient.Configuration;
 using CrowdfundingClient.Models;
@@ -22,8 +25,14 @@ public class SolanaCampaignService
     {
         _rpc = ClientFactory.GetClient(config.RpcUrl);
         var keypairJson = File.ReadAllText(config.KeypairPath);
-        var bytes = System.Text.Json.JsonSerializer.Deserialize<byte[]>(keypairJson)!;
+        // Solana keypair files are JSON arrays of integers, not base64
+        var ints = System.Text.Json.JsonSerializer.Deserialize<int[]>(keypairJson)!;
+        var bytes = ints.Select(i => (byte)i).ToArray();
         _signer = new Account(bytes[..64], bytes[32..64]);
+        if (string.IsNullOrEmpty(config.ProgramId))
+            throw new InvalidOperationException($"SOLANA_PROGRAM_ID_{config.Variant} is not set.");
+        if (string.IsNullOrEmpty(config.PaymentMint))
+            throw new InvalidOperationException("SOLANA_PAYMENT_MINT is not set.");
         _programId = new PublicKey(config.ProgramId);
         _paymentMint = new PublicKey(config.PaymentMint);
         _campaignAddress = string.IsNullOrEmpty(config.CampaignAddress) ? null : new PublicKey(config.CampaignAddress);
@@ -43,8 +52,14 @@ public class SolanaCampaignService
     }
 
     public async Task<TxOutput> CreateCampaign(ulong softCap, ulong hardCap,
-        long deadline, byte[] milestones, ulong? campaignIdOverride = null)
+        long deadlineSeconds, byte[] milestones, ulong? campaignIdOverride = null)
     {
+        // Derive deadline from Solana block time to stay consistent with the on-chain clock.
+        var slotResp = await _rpc.GetSlotAsync();
+        var blockTimeResp = await _rpc.GetBlockTimeAsync(slotResp.Result);
+        var solanaNow = blockTimeResp.Result > 0 ? (long)blockTimeResp.Result : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var deadline = solanaNow + deadlineSeconds;
+
         var campaignId = campaignIdOverride ?? (ulong)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() & 0xFFFFFFFF);
         var campaign = PdaHelper.CampaignPda(_signer.PublicKey, campaignId, _programId);
         var vault = PdaHelper.VaultPda(campaign, _programId);
@@ -68,6 +83,7 @@ public class SolanaCampaignService
             ElapsedMs = result.ElapsedMs,
             Data = new()
             {
+                ["error"] = result.ErrorCode,
                 ["campaignAddress"] = campaign.Key,
                 ["vaultAddress"] = vault.Key,
                 ["receiptMintAddress"] = receiptMint.Key,
@@ -86,8 +102,8 @@ public class SolanaCampaignService
         var vault = PdaHelper.VaultPda(campaign, _programId);
         var receiptMint = PdaHelper.ReceiptMintPda(campaign, _programId);
         var contributorRecord = PdaHelper.ContributorRecordPda(campaign, _signer.PublicKey, _programId);
-        var contributorPaymentAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, _paymentMint);
-        var contributorReceiptAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, receiptMint);
+        var contributorPaymentAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, _paymentMint, _tokenProgram);
+        var contributorReceiptAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, receiptMint, _tokenProgram);
 
         var ix = InstructionBuilder.Contribute(
             _programId, _signer.PublicKey, campaign, contributorRecord,
@@ -107,15 +123,43 @@ public class SolanaCampaignService
             ElapsedMs = result.ElapsedMs,
             Data = new()
             {
+                ["error"] = result.ErrorCode,
                 ["amount"] = amount.ToString(),
                 ["campaignAddress"] = campaign.Key,
             }
         };
     }
 
-    public async Task<TxOutput> Finalize(string? campaignAddr = null)
+    public async Task<TxOutput> Finalize(string? campaignAddr = null, bool advanceTime = false)
     {
         var campaign = ResolveCampaign(campaignAddr);
+
+        if (advanceTime)
+        {
+            // Solana localnet clock cannot be advanced via RPC (unlike Hardhat's evm_increaseTime).
+            // Strategy: if the deadline is close, sleep until it passes; otherwise, error.
+            var pre = await FetchCampaignState(campaign);
+            if (pre != null)
+            {
+                var deadline = long.Parse(pre["deadline"]?.ToString() ?? "0");
+                // Use Solana block time, not wall clock — the program validates against
+                // Clock::get()?.unix_timestamp which can lag behind real time.
+                var slotResp = await _rpc.GetSlotAsync();
+                var blockTimeResp = await _rpc.GetBlockTimeAsync(slotResp.Result);
+                var solanaNow = blockTimeResp.Result > 0 ? (long)blockTimeResp.Result : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                var remaining = deadline - solanaNow;
+                if (remaining > 0)
+                {
+                    const int maxWaitSeconds = 300;
+                    if (remaining > maxWaitSeconds)
+                        throw new InvalidOperationException(
+                            $"--advance-time: deadline is {remaining}s away — too long to sleep. " +
+                            $"Re-create the campaign with --deadline-seconds 5 for instant finalization.");
+                    Console.Error.WriteLine($"[sol] deadline in {remaining}s — sleeping until it passes...");
+                    await Task.Delay((int)(remaining + 2) * 1000);
+                }
+            }
+        }
 
         var ix = InstructionBuilder.Finalize(_programId, _signer.PublicKey, campaign);
         var result = await TransactionHelper.SendAndConfirm(_rpc, _signer, ix);
@@ -134,6 +178,7 @@ public class SolanaCampaignService
             ElapsedMs = result.ElapsedMs,
             Data = new()
             {
+                ["error"] = result.ErrorCode,
                 ["successful"] = state?["successful"],
                 ["totalRaised"] = state?["totalRaised"],
                 ["campaignAddress"] = campaign.Key,
@@ -145,7 +190,7 @@ public class SolanaCampaignService
     {
         var campaign = ResolveCampaign(campaignAddr);
         var vault = PdaHelper.VaultPda(campaign, _programId);
-        var creatorPaymentAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, _paymentMint);
+        var creatorPaymentAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, _paymentMint, _tokenProgram);
 
         // Read state before for milestone index
         var before = await FetchCampaignState(campaign);
@@ -172,6 +217,7 @@ public class SolanaCampaignService
             ElapsedMs = result.ElapsedMs,
             Data = new()
             {
+                ["error"] = result.ErrorCode,
                 ["milestoneIndex"] = milestoneIndex,
                 ["amount"] = amount.ToString(),
                 ["campaignAddress"] = campaign.Key,
@@ -185,8 +231,8 @@ public class SolanaCampaignService
         var vault = PdaHelper.VaultPda(campaign, _programId);
         var receiptMint = PdaHelper.ReceiptMintPda(campaign, _programId);
         var contributorRecord = PdaHelper.ContributorRecordPda(campaign, _signer.PublicKey, _programId);
-        var contributorPaymentAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, _paymentMint);
-        var contributorReceiptAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, receiptMint);
+        var contributorPaymentAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, _paymentMint, _tokenProgram);
+        var contributorReceiptAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, receiptMint, _tokenProgram);
 
         var ix = InstructionBuilder.Refund(
             _programId, _signer.PublicKey, campaign, contributorRecord,
@@ -205,6 +251,7 @@ public class SolanaCampaignService
             ElapsedMs = result.ElapsedMs,
             Data = new()
             {
+                ["error"] = result.ErrorCode,
                 ["contributor"] = _signer.PublicKey.Key,
                 ["campaignAddress"] = campaign.Key,
             }
@@ -225,7 +272,7 @@ public class SolanaCampaignService
         try
         {
             var recordPda = PdaHelper.ContributorRecordPda(campaign, new PublicKey(contributor), _programId);
-            var recordInfo = await _rpc.GetAccountInfoAsync(recordPda.Key);
+            var recordInfo = await _rpc.GetAccountInfoAsync(recordPda.Key, Commitment.Confirmed);
             if (recordInfo.Result?.Value?.Data?[0] != null)
             {
                 var recordBytes = Convert.FromBase64String(recordInfo.Result.Value.Data[0]);
@@ -260,29 +307,31 @@ public class SolanaCampaignService
 
     private async Task<Dictionary<string, object?>?> FetchCampaignState(PublicKey campaign)
     {
-        var accountInfo = await _rpc.GetAccountInfoAsync(campaign.Key);
+        var accountInfo = await _rpc.GetAccountInfoAsync(campaign.Key, Commitment.Confirmed);
         if (accountInfo.Result?.Value?.Data?[0] == null)
             return null;
 
         var bytes = Convert.FromBase64String(accountInfo.Result.Value.Data[0]);
-        if (bytes.Length < 8 + 169)
+        // Campaign account: 8 discriminator + 161 fields = 169 bytes (256 allocated)
+        if (bytes.Length < 169)
             return null;
 
         // Skip 8-byte Anchor discriminator
         int offset = 8;
-        var creator = new PublicKey(bytes[offset..(offset + 32)]); offset += 32;
+        var creator     = new PublicKey(bytes[offset..(offset + 32)]); offset += 32;
         var paymentMint = new PublicKey(bytes[offset..(offset + 32)]); offset += 32;
         var receiptMint = new PublicKey(bytes[offset..(offset + 32)]); offset += 32;
-        var softCap = BitConverter.ToUInt64(bytes, offset); offset += 8;
-        var hardCap = BitConverter.ToUInt64(bytes, offset); offset += 8;
-        var deadline = BitConverter.ToInt64(bytes, offset); offset += 8;
-        var totalRaised = BitConverter.ToUInt64(bytes, offset); offset += 8;
-        var finalized = bytes[offset] != 0; offset += 1;
-        var successful = bytes[offset] != 0; offset += 1;
-        var currentMilestone = bytes[offset]; offset += 1;
-        var totalWithdrawn = BitConverter.ToUInt64(bytes, offset); offset += 8;
+        var softCap          = BitConverter.ToUInt64(bytes, offset); offset += 8;
+        var hardCap          = BitConverter.ToUInt64(bytes, offset); offset += 8;
+        var deadline         = BitConverter.ToInt64(bytes,  offset); offset += 8;
+        var totalRaised      = BitConverter.ToUInt64(bytes, offset); offset += 8;
+        var finalized        = bytes[offset] != 0; offset += 1;
+        var successful       = bytes[offset] != 0; offset += 1;
+        var currentMilestone = bytes[offset];       offset += 1;
+        var totalWithdrawn   = BitConverter.ToUInt64(bytes, offset); offset += 8;
+        // milestones is [u8; 10] — a fixed array (not Vec), preceded by milestone_count: u8
         var milestoneCount = bytes[offset]; offset += 1;
-        var milestones = bytes[offset..(offset + milestoneCount)]; offset += 10;
+        var milestones = bytes[offset..(offset + 10)]; offset += 10;
         var campaignId = BitConverter.ToUInt64(bytes, offset);
 
         return new Dictionary<string, object?>
@@ -302,6 +351,69 @@ public class SolanaCampaignService
             ["milestoneCount"] = (int)milestoneCount,
             ["milestones"] = milestones.Select(b => (int)b).ToList(),
             ["campaignId"] = campaignId.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// Creates a new SPL token mint and mints tokens to the signer's ATA.
+    /// Run this after solana-test-validator --reset to recreate the payment mint.
+    /// Output includes the mint address to put in SOLANA_PAYMENT_MINT.
+    /// </summary>
+    public async Task<TxOutput> CreateMint(byte decimals = 6, ulong mintAmount = 10_000_000_000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        // 1. Generate a new keypair for the mint account
+        var mintKp = new Account();
+
+        // 2. Get minimum rent-exempt balance for a Mint account (82 bytes)
+        var rentResp = await _rpc.GetMinimumBalanceForRentExemptionAsync(82);
+        var rentLamports = rentResp.Result;
+
+        // 3. Create the mint account + initialize it in one transaction.
+        // For V5 (Token-2022), _tokenProgram is Token-2022 so the account is owned by
+        // that program and InitializeMint targets it. Format is identical to classic SPL.
+        var createAccountIx = SystemProgram.CreateAccount(
+            _signer.PublicKey, mintKp.PublicKey,
+            rentLamports, TokenProgram.MintAccountDataSize,
+            _tokenProgram);
+
+        var initMintIx = InstructionBuilder.InitializeMint(
+            mintKp.PublicKey, decimals, _signer.PublicKey, _signer.PublicKey, _tokenProgram);
+
+        var r1 = await TransactionHelper.SendAndConfirm(
+            _rpc, _signer,
+            new[] { createAccountIx, initMintIx },
+            new[] { mintKp });
+
+        // 4. Create ATA for the signer (Token-2022 ATAs use Token-2022 program ID in seeds)
+        var ata = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, mintKp.PublicKey, _tokenProgram);
+        var createAtaIx = InstructionBuilder.CreateAta(
+            _signer.PublicKey, _signer.PublicKey, mintKp.PublicKey, _tokenProgram);
+        await TransactionHelper.SendAndConfirm(_rpc, _signer, createAtaIx);
+
+        // 5. Mint tokens to the signer's ATA
+        var mintToIx = InstructionBuilder.MintTo(
+            mintKp.PublicKey, ata, mintAmount, _signer.PublicKey, _tokenProgram);
+        await TransactionHelper.SendAndConfirm(_rpc, _signer, mintToIx);
+
+        sw.Stop();
+        Console.Error.WriteLine($"\nUpdate .env:");
+        Console.Error.WriteLine($"  SOLANA_PAYMENT_MINT={mintKp.PublicKey.Key}");
+
+        return new TxOutput
+        {
+            Chain = "solana",
+            Operation = "create-mint",
+            Status = r1.Success ? "success" : "reverted",
+            ElapsedMs = sw.ElapsedMilliseconds,
+            Data = new()
+            {
+                ["mint"] = mintKp.PublicKey.Key,
+                ["ata"] = ata.Key,
+                ["decimals"] = (int)decimals,
+                ["mintedAmount"] = mintAmount.ToString(),
+            }
         };
     }
 }

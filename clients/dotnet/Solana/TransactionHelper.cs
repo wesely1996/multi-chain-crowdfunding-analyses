@@ -6,20 +6,30 @@ using Solnet.Wallet;
 
 namespace CrowdfundingClient.Solana;
 
-public record TxResult(string Signature, long Slot, ulong Fee, long ElapsedMs, bool Success);
+public record TxResult(string Signature, long Slot, ulong Fee, long ElapsedMs, bool Success, string? ErrorCode = null);
 
 public static class TransactionHelper
 {
-    public static async Task<TxResult> SendAndConfirm(
+    public static Task<TxResult> SendAndConfirm(
         IRpcClient rpc, Account signer, TransactionInstruction instruction)
+        => SendAndConfirm(rpc, signer, new[] { instruction }, Array.Empty<Account>());
+
+    public static Task<TxResult> SendAndConfirm(
+        IRpcClient rpc, Account signer, TransactionInstruction instruction, Account[] extraSigners)
+        => SendAndConfirm(rpc, signer, new[] { instruction }, extraSigners);
+
+    public static async Task<TxResult> SendAndConfirm(
+        IRpcClient rpc, Account signer, IEnumerable<TransactionInstruction> instructions, Account[] extraSigners)
     {
         var recentHash = await rpc.GetLatestBlockHashAsync();
 
-        var tx = new TransactionBuilder()
+        var builder = new TransactionBuilder()
             .SetRecentBlockHash(recentHash.Result.Value.Blockhash)
-            .SetFeePayer(signer)
-            .AddInstruction(instruction)
-            .Build(signer);
+            .SetFeePayer(signer);
+        foreach (var ix in instructions)
+            builder.AddInstruction(ix);
+        var allSigners = new[] { signer }.Concat(extraSigners).ToArray();
+        var tx = builder.Build(allSigners);
 
         var sw = Stopwatch.StartNew();
         var sendResult = await rpc.SendTransactionAsync(tx, skipPreflight: true);
@@ -45,12 +55,26 @@ public static class TransactionHelper
 
         // Get transaction details for fee and slot
         await Task.Delay(500); // brief delay for indexing
-        var txInfo = await rpc.GetTransactionAsync(sig);
+        var txInfo = await rpc.GetTransactionAsync(sig, Solnet.Rpc.Types.Commitment.Confirmed);
 
         var fee = txInfo?.Result?.Meta?.Fee ?? 0;
         var slot = txInfo?.Result?.Slot ?? 0;
-        var success = txInfo?.Result?.Meta?.Error == null;
+        var metaError = txInfo?.Result?.Meta?.Error;
+        var success = metaError == null;
 
-        return new TxResult(sig, (long)slot, fee, sw.ElapsedMilliseconds, success);
+        string? errorCode = null;
+        if (!success)
+        {
+            // Surface program error to stderr for easier debugging
+            errorCode = metaError?.ToString();
+            var logs = txInfo?.Result?.Meta?.LogMessages;
+            if (logs != null)
+            {
+                foreach (var line in logs)
+                    Console.Error.WriteLine($"  [log] {line}");
+            }
+        }
+
+        return new TxResult(sig, (long)slot, fee, sw.ElapsedMilliseconds, success, errorCode);
     }
 }

@@ -205,19 +205,27 @@ VARIANT=V1 dotnet run -- status
 
 #### Solana lifecycle (WSL only)
 
+> **After `solana-test-validator --reset`:** the payment mint is wiped.
+> Run `sol:create-mint` first and update `SOLANA_PAYMENT_MINT` in `.env`.
+
 ```bash
-VARIANT=V4 dotnet run -- sol:create-campaign --deadline-seconds 15
+# One-time per validator reset: recreate SPL payment mint + fund your wallet
+VARIANT=V4 dotnet run -- sol:create-mint
+# → prints "Update .env: SOLANA_PAYMENT_MINT=<ADDRESS>" — copy that value into .env
+
+VARIANT=V4 dotnet run -- sol:create-campaign --deadline-seconds 120
 # → copy campaignAddress → pass --campaign <ADDRESS> or set SOLANA_CAMPAIGN_ADDRESS in .env
+# (use ≥120 s — dotnet startup takes ~20 s per invocation)
 VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
-# wait 15 s for deadline to pass
-VARIANT=V4 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:finalize --advance-time --campaign <ADDRESS>
+# --advance-time sleeps until deadline passes (max 300 s), then submits finalize
 VARIANT=V4 dotnet run -- sol:withdraw --campaign <ADDRESS>
 VARIANT=V4 dotnet run -- sol:status
 
 # V5 — Token-2022 (identical flow)
-VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 15
+VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 120
 VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
-VARIANT=V5 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:finalize --advance-time --campaign <ADDRESS>
 VARIANT=V5 dotnet run -- sol:withdraw --campaign <ADDRESS>
 VARIANT=V5 dotnet run -- sol:status
 ```
@@ -287,6 +295,9 @@ VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
 | V5 IDL not found                                            | Run `anchor build` in `contracts/solana/` first                                                                                                                                    |
 | `DeclaredProgramIdMismatch` on deploy                       | Run `anchor keys sync && anchor build && anchor deploy` — keypair IDs drifted from `declare_id!` (common after validator reset or keypair regeneration)                            |
 | `OSError: Cannot load native module 'Crypto.Util._cpuid_c'` | pycryptodome was installed from Git Bash (MinGW build). Reinstall from PowerShell: `.\.venv\Scripts\Activate.ps1` then `pip uninstall pycryptodome -y && pip install pycryptodome` |
+| `AccountNotInitialized` on Solana contribute / finalize      | Payment mint was wiped by `solana-test-validator --reset`. Run `VARIANT=V4 dotnet run -- sol:create-mint` (from `clients/dotnet`), then update `SOLANA_PAYMENT_MINT` in `.env` with the printed address. |
+| `--advance-time: deadline is Xs away — too long to sleep`    | Campaign deadline exceeds the 300 s safety cap. Re-create with `--deadline-seconds 120` (or any value ≤ 298 s after accounting for `dotnet run` startup time). |
+| `DeadlineNotPassed` immediately after `--advance-time` sleep | Solana clock lags wall clock by a few seconds. The client already adds 2 s buffer; if it still fails, increase the buffer or use a slightly longer `--deadline-seconds`. |
 
 ---
 
@@ -555,17 +566,26 @@ $env:VARIANT = "V1"; dotnet run -- status
 
 #### Solana lifecycle (WSL only)
 
+> **After `solana-test-validator --reset`:** the payment mint is wiped.
+> Run `sol:create-mint` first and update `SOLANA_PAYMENT_MINT` in `.env`.
+
 ```bash
-VARIANT=V4 dotnet run -- sol:create-campaign --deadline-seconds 15
+# One-time per validator reset: recreate SPL payment mint + fund your wallet
+VARIANT=V4 dotnet run -- sol:create-mint
+# → prints "Update .env: SOLANA_PAYMENT_MINT=<ADDRESS>" — copy that value into .env
+
+VARIANT=V4 dotnet run -- sol:create-campaign --deadline-seconds 120
+# (use ≥120 s — dotnet startup takes ~20 s per invocation)
 VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
-VARIANT=V4 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:finalize --advance-time --campaign <ADDRESS>
+# --advance-time sleeps until deadline passes (max 300 s), then submits finalize
 VARIANT=V4 dotnet run -- sol:withdraw --campaign <ADDRESS>
 VARIANT=V4 dotnet run -- sol:status
 
 # V5 — Token-2022
-VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 15
+VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 120
 VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
-VARIANT=V5 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:finalize --advance-time --campaign <ADDRESS>
 VARIANT=V5 dotnet run -- sol:withdraw --campaign <ADDRESS>
 VARIANT=V5 dotnet run -- sol:status
 ```
@@ -612,6 +632,20 @@ npm run dev        # open http://localhost:3000
 ```
 
 Result files from benchmark runs appear automatically after a browser refresh.
+
+#### Dashboard — Windows compatibility
+
+| Variant | Client | Works natively? | Notes |
+|---------|--------|-----------------|-------|
+| V1 / V2 / V3 (EVM) | python | Yes | Default env: `hardhat-localnet` |
+| V1 / V2 / V3 (EVM) | ts | Yes | Requires `npm install` in `clients/ts` |
+| V1 / V2 / V3 (EVM) | dotnet | Yes | Requires `dotnet build` in `clients/dotnet` |
+| V1 / V2 / V3 (EVM) | test script | Yes | Self-contained Python harness |
+| V4 / V5 (Solana) | any | **No — WSL only** | `anchorpy` requires Solana toolchain |
+
+Solana variants are disabled in the dashboard when running on Windows.
+Select `hardhat-localnet` (default) when a local `npx hardhat node` is running;
+switch to `sepolia` only when `EVM_RPC_URL` points to a Sepolia RPC endpoint.
 
 ### Windows-specific notes
 
@@ -1128,21 +1162,24 @@ VARIANT=V3 dotnet run -- finalize && VARIANT=V3 dotnet run -- withdraw
 Set `VARIANT` to switch between V4 (SPL Token) and V5 (Token-2022). Run inside WSL.
 
 ```bash
+# One-time per validator reset: recreate SPL payment mint
+VARIANT=V4 dotnet run -- sol:create-mint
+# → prints "Update .env: SOLANA_PAYMENT_MINT=<ADDRESS>" — copy that value into .env
+
 # V4 — SPL Token (classic)
 VARIANT=V4 dotnet run -- sol:create-campaign
-VARIANT=V4 dotnet run -- sol:create-campaign --soft-cap 100000000 --hard-cap 500000000 --deadline-seconds 1800
-VARIANT=V4 dotnet run -- sol:contribute
+VARIANT=V4 dotnet run -- sol:create-campaign --soft-cap 100 --hard-cap 500 --deadline-seconds 120
 VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
-VARIANT=V4 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:finalize --advance-time --campaign <ADDRESS>
 VARIANT=V4 dotnet run -- sol:withdraw --campaign <ADDRESS>
 VARIANT=V4 dotnet run -- sol:refund --campaign <ADDRESS>
 VARIANT=V4 dotnet run -- sol:status
 VARIANT=V4 dotnet run -- sol:status --campaign <ADDRESS> --contributor <PUBKEY>
 
 # V5 — Token-2022 extensions
-VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 1800
+VARIANT=V5 dotnet run -- sol:create-campaign --deadline-seconds 120
 VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
-VARIANT=V5 dotnet run -- sol:finalize --campaign <ADDRESS>
+VARIANT=V5 dotnet run -- sol:finalize --advance-time --campaign <ADDRESS>
 VARIANT=V5 dotnet run -- sol:withdraw --campaign <ADDRESS>
 VARIANT=V5 dotnet run -- sol:refund --campaign <ADDRESS>
 VARIANT=V5 dotnet run -- sol:status --campaign <ADDRESS>
@@ -1244,17 +1281,22 @@ anchor build
 anchor deploy
 ```
 
-After deploying, you need an SPL token mint for payments. Create one with:
+After deploying, you need an SPL token mint for payments. Create one with the .NET client:
 
 ```bash
-spl-token create-token --decimals 6
-# Note the mint address → set as SOLANA_PAYMENT_MINT in .env
+cd clients/dotnet
+VARIANT=V4 dotnet run -- sol:create-mint
+# → stderr prints: "Update .env: SOLANA_PAYMENT_MINT=<ADDRESS>"
+# Copy that address into .env
 ```
+
+> **Note:** the payment mint is wiped on every `solana-test-validator --reset`. Re-run
+> `sol:create-mint` and update `SOLANA_PAYMENT_MINT` in `.env` each time you reset the validator.
 
 Update the root `.env` with:
 
 - `SOLANA_PROGRAM_ID_V4` — from `anchor deploy` output (crowdfunding program)
-- `SOLANA_PAYMENT_MINT` — from `spl-token create-token` output
+- `SOLANA_PAYMENT_MINT` — from `sol:create-mint` output
 - `SOLANA_KEYPAIR_PATH` — path to your Solana keypair JSON file
 
 Then run the lifecycle. Set `VARIANT` to select V4 (SPL Token) or V5 (Token-2022):
@@ -1278,15 +1320,20 @@ VARIANT=V5 npm run sol:finalize
 VARIANT=V5 npm run sol:withdraw
 VARIANT=V5 npm run sol:status
 
-# ── .NET client ──
+# ── .NET client — full lifecycle ──
 cd clients/dotnet
-VARIANT=V4 dotnet run -- sol:status --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:create-mint            # recreate mint after validator reset
+VARIANT=V4 dotnet run -- sol:create-campaign --deadline-seconds 120
+# → copy campaignAddress into .env as SOLANA_CAMPAIGN_ADDRESS
 VARIANT=V4 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
-VARIANT=V5 dotnet run -- sol:contribute --amount 10 --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:finalize --advance-time --campaign <ADDRESS>
+# --advance-time sleeps until the Solana clock passes the deadline (max 300 s)
+VARIANT=V4 dotnet run -- sol:withdraw --campaign <ADDRESS>
+VARIANT=V4 dotnet run -- sol:status --campaign <ADDRESS>
 ```
 
-> **Quick test tip:** Use `--deadline-seconds 10` when creating a campaign so you
-> only wait 10 seconds before finalize becomes callable.
+> **Quick test tip (.NET):** Use `--deadline-seconds 120` (not 10) — `dotnet run` startup
+> takes ~20 s per invocation. `--advance-time` on `sol:finalize` handles the wait automatically.
 
 ### Cross-client verification
 

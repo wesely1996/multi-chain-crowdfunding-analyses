@@ -73,3 +73,102 @@ The dashboard resolves `../benchmarks/results` relative to its working directory
 - Run state is held in in-process memory — it resets when the Next.js server restarts.
 - V2 and V3 benchmarks require EVM contract artifacts to be compiled (`npx hardhat compile`) before triggering a run from the UI.
 - For full setup and benchmark workflow see [`docs/setup.md`](../docs/setup.md) and [`docs/end-to-end.md`](../docs/end-to-end.md).
+
+---
+
+## Quick start — all contract/client combinations
+
+Minimum steps to collect results for every combination.
+
+### One-time setup
+
+**Terminal A — EVM node (keep running):**
+```powershell
+cd contracts/evm
+npm install
+npx hardhat compile
+npx hardhat node
+```
+
+**Python venv (from repo root, once):**
+```powershell
+cd benchmarks
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --no-deps web3==6.20.3
+python -m pip install lru-dict==1.3.0
+python -m pip install solana==0.36.6 solders==0.26.0 anchorpy==0.21.0 tabulate==0.9.0
+python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" "eth-typing>=3.0.0,<5" ^
+    "eth-utils>=2.1.0,<5" "hexbytes>=0.1.0,<0.4.0" "eth-hash[pycryptodome]>=0.5.1" ^
+    "jsonschema>=4.0.0" "protobuf>=4.21.6" aiohttp requests pyunormalize rlp ^
+    "websockets>=10.0,<16.0" typing-extensions "toolz>=0.11.2,<0.12.0"
+```
+
+**Terminal B — Dashboard (keep running):**
+```powershell
+cd dashboard
+npm install
+npm run dev    # open http://localhost:3000/run
+```
+
+**`.env` at repo root** — copy from `.env.example`, set at minimum:
+```
+PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+RPC_URL=http://127.0.0.1:8545
+```
+
+> The value above is the Hardhat default account #0 private key — public knowledge, safe for localnet only.
+
+### EVM combinations (Windows native)
+
+Select `hardhat-localnet` in the environment dropdown (default). The benchmark script auto-deploys contracts — no separate deploy step needed.
+
+| Variant | Client | Extra setup |
+|---------|--------|-------------|
+| V1 / V2 / V3 | test-script | None — fully self-contained |
+| V1 / V2 / V3 | python | venv active + `.env` with `PRIVATE_KEY` |
+| V1 / V2 / V3 | ts | `cd clients/ts && npm install` (once) |
+| V1 / V2 / V3 | dotnet | `cd clients/dotnet && dotnet build` (once) |
+
+Dashboard flow: select variant → client → kind → env=`hardhat-localnet` → **Start Run**.
+
+Results appear under `/benchmarks` after the run completes.
+
+### Solana combinations (WSL only)
+
+The dashboard disables Solana variants on Windows — the Python harness imports `anchorpy` unconditionally, which requires the Solana toolchain (WSL-only). Run these from WSL directly.
+
+**WSL Terminal A — validator (keep running):**
+```bash
+# Run from WSL home (~), not from /mnt/c/...
+solana-test-validator --reset
+```
+
+**WSL Terminal B — build and deploy programs:**
+```bash
+cd /mnt/c/<path-to-repo>/contracts/solana
+npm install
+anchor build
+anchor deploy
+```
+
+**Run benchmarks from WSL:**
+```bash
+cd /mnt/c/<path-to-repo>
+source benchmarks/.venv/bin/activate
+VARIANT=V4 python benchmarks/run_tests.py --platform solana
+VARIANT=V5 python benchmarks/run_tests.py --platform solana
+```
+
+Results land in `benchmarks/results/` and appear in the `/benchmarks` page after a refresh.
+
+### How each client is invoked
+
+| Client | Mechanism | What runs |
+|--------|-----------|-----------|
+| `test-script` | In-process Python | `run_tests.py` — direct web3.py calls |
+| `python` | Python subprocess | `clients/python/` scripts via `run_client_benchmark.py` |
+| `ts` | `npm run <op>` subprocess | `clients/ts/src/evm/*.ts` via tsx |
+| `dotnet` | `dotnet run -- <op>` subprocess | `clients/dotnet/` project |
+
+`run_client_benchmark.py` injects `FACTORY_ADDRESS`, `CAMPAIGN_ADDRESS`, and `PAYMENT_TOKEN_ADDRESS` from the auto-deploy output into each subprocess environment — the ts and dotnet clients do not need those values pre-set in `.env`.

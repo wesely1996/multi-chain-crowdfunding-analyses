@@ -38,10 +38,10 @@ public static class PdaHelper
         return pda;
     }
 
-    public static PublicKey AssociatedTokenAddress(PublicKey owner, PublicKey mint)
+    public static PublicKey AssociatedTokenAddress(PublicKey owner, PublicKey mint, PublicKey? tokenProgram = null)
     {
         var ataProgramId = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-        var tokenProgramId = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+        var tokenProgramId = tokenProgram ?? new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
         PublicKey.TryFindProgramAddress(
             new[] { owner.KeyBytes, tokenProgramId.KeyBytes, mint.KeyBytes },
             ataProgramId, out var pda, out _);

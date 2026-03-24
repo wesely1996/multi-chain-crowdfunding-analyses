@@ -39,6 +39,8 @@ export interface BenchmarkFile {
   limitations: string[];
   operations: OperationRecord[];
   throughput: ThroughputRecord;
+  /** Populated at load time from the filename; not present in the JSON file itself. */
+  kind?: string;
 }
 
 export type RunStatus = "idle" | "running" | "success" | "error";

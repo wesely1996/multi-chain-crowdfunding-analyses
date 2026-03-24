@@ -5,7 +5,7 @@ V1/V2: approve + contribute(amount)
 V3:    approve + contribute(tierId)
 
 Usage:
-    python -m clients.python evm:contribute --amount 10
+    python -m clients.python evm:contribute --amount 10       # 10 USDC
     python -m clients.python evm:contribute --variant V3 --tier-id 0
 """
 
@@ -88,8 +88,8 @@ def contribute(variant: str, amount: int | None = None, tier_id: int | None = No
 def main(args=None) -> None:
     parser = argparse.ArgumentParser(description="Contribute to a campaign.")
     parser.add_argument("--variant", default=evm_config.VARIANT)
-    parser.add_argument("--amount", type=int, default=None,
-                        help="Contribution amount in token base units (ignored for V3)")
+    parser.add_argument("--amount", type=float, default=10.0,
+                        help="Contribution amount in USDC (ignored for V3)")
     parser.add_argument("--tier-id", type=int, default=None,
                         help="Tier ID for V3 ERC-1155 variant")
     parsed = parser.parse_args(args)
@@ -97,7 +97,7 @@ def main(args=None) -> None:
     try:
         output = contribute(
             variant=parsed.variant,
-            amount=parsed.amount,
+            amount=int(round(parsed.amount * 10 ** evm_config.DECIMALS)),
             tier_id=parsed.tier_id,
         )
         print_result(output)
