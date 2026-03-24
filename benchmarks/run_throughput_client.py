@@ -10,18 +10,18 @@ cost is amortized across the session).
 Usage
 -----
     # EVM — ts-evm client
-    python benchmarks/run_throughput_client.py \\
-        --platform evm --client ts --variant V1 --env hardhat-localnet \\
-        --deploy-json /tmp/evm_deploy.json
+    python benchmarks/run_throughput_client.py \
+        --platform evm --client ts --variant V1 --env hardhat-localnet
 
     # EVM — dotnet client
-    python benchmarks/run_throughput_client.py \\
-        --platform evm --client dotnet --variant V1 --env hardhat-localnet \\
-        --deploy-json /tmp/evm_deploy.json
+    python benchmarks/run_throughput_client.py \
+        --platform evm --client dotnet --variant V1 --env hardhat-localnet
 
 Output
 ------
-  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_throughput.json
+  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_throughput_{TIMESTAMP}.json
+where TIMESTAMP is a Unix epoch integer (seconds).  Multiple runs accumulate
+as separate timestamped files; use benchmarks/collect_metrics.py to compare.
 
 Notes
 -----
@@ -179,7 +179,7 @@ def throughput_evm_client(client: str, variant: str, env_name: str, deploy_json:
         },
     }
 
-    print(f"\n[{client}] Throughput: {config.N_CONTRIBUTIONS} tx in {total_ms} ms → {tps} TPS")
+    print(f"\n[{client}] Throughput: {config.N_CONTRIBUTIONS} tx in {total_ms} ms -> {tps} TPS")
     return result
 
 
@@ -425,7 +425,7 @@ def main() -> None:
     else:
         result = throughput_solana_client(args.client, variant, env_name)
 
-    out_path = config.results_path(variant, result["client"], "throughput", env_name)
+    out_path = config.results_path(variant, result["client"], "throughput", env_name, result.get("timestamp_utc"))
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as fh:
         json.dump(result, fh, indent=2)

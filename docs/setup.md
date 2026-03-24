@@ -62,9 +62,11 @@ cd contracts/solana && anchor deploy
 
 ### Step 3 — Python benchmark harness
 
+The benchmark harness uses the Python client venv at `clients/python/.venv`.
+
 ```bash
 # From repo root — create (or reuse) the shared venv
-cd benchmarks
+cd clients/python
 python3 -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
 
@@ -79,32 +81,46 @@ python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" \
     aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" \
     typing-extensions "toolz>=0.11.2,<0.12.0"
 
+# Return to repo root before running benchmark scripts
+cd ../..
+
 # EVM lifecycle (Hardhat node must be running)
-VARIANT=V1 CLIENT=python python run_tests.py --platform evm
-VARIANT=V2 CLIENT=python python run_tests.py --platform evm
-VARIANT=V3 CLIENT=python python run_tests.py --platform evm
+VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
+VARIANT=V2 CLIENT=python python benchmarks/run_tests.py --platform evm
+VARIANT=V3 CLIENT=python python benchmarks/run_tests.py --platform evm
 
 # EVM throughput
-VARIANT=V1 CLIENT=python python throughput_test.py --platform evm
+VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
 
 # Solana lifecycle (solana-test-validator + anchor deploy must be running)
-VARIANT=V4 CLIENT=python python run_tests.py --platform solana
-VARIANT=V5 CLIENT=python python run_tests.py --platform solana
+VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
+VARIANT=V5 CLIENT=python python benchmarks/run_tests.py --platform solana
 
 # Aggregate and compare
-python collect_metrics.py
+python benchmarks/collect_metrics.py
 ```
 
-As a subprocess-driven client in the benchmark harness:
+Result files are written to `benchmarks/results/` using the naming convention:
+
+```
+{VARIANT}_{CLIENT}_{ENV}_{KIND}_{TIMESTAMP}.json
+```
+
+Example: `V1_python_hardhat-localnet_lifecycle_1774369893.json`
+
+The timestamp (Unix epoch seconds) is appended by `benchmarks/config.py::results_path()` so
+multiple runs accumulate as separate files. The dashboard deduplicates to the latest per
+`(variant, client, environment, kind)` combination for the result cards, and uses all runs
+for the Comparative Analysis averaging.
+
+As a subprocess-driven client in the benchmark harness (used by the dashboard):
 
 ```bash
 python benchmarks/run_client_benchmark.py \
-    --platform evm --client python --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
+    --platform evm --client python --variant V1 --env hardhat-localnet
 
 python benchmarks/run_throughput_client.py \
-    --platform evm --client python --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
+    --platform evm --client python --variant V1 --env hardhat-localnet
 ```
 
 ### Step 4 — TypeScript client
@@ -236,7 +252,7 @@ The Python client (`clients/python/`) is a proper CLI client that mirrors the Ty
 
 ```bash
 # Activate the venv from Step 3 (if not already active)
-source benchmarks/.venv/bin/activate
+source clients/python/.venv/bin/activate
 
 # Load the root .env first (bash/WSL):
 set -a; source .env; set +a
@@ -294,7 +310,7 @@ VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
 | Dashboard shows no results                                  | Result files must have `"schema_version": "2"`; start `npm run dev` from `dashboard/`                                                                                              |
 | V5 IDL not found                                            | Run `anchor build` in `contracts/solana/` first                                                                                                                                    |
 | `DeclaredProgramIdMismatch` on deploy                       | Run `anchor keys sync && anchor build && anchor deploy` — keypair IDs drifted from `declare_id!` (common after validator reset or keypair regeneration)                            |
-| `OSError: Cannot load native module 'Crypto.Util._cpuid_c'` | pycryptodome was installed from Git Bash (MinGW build). Reinstall from PowerShell: `.\.venv\Scripts\Activate.ps1` then `pip uninstall pycryptodome -y && pip install pycryptodome` |
+| `OSError: Cannot load native module 'Crypto.Util._cpuid_c'` | pycryptodome was installed from Git Bash (MinGW build). Reinstall from PowerShell: `clients\python\.venv\Scripts\Activate.ps1` then `pip uninstall pycryptodome -y && pip install pycryptodome` |
 | `AccountNotInitialized` on Solana contribute / finalize      | Payment mint was wiped by `solana-test-validator --reset`. Run `VARIANT=V4 dotnet run -- sol:create-mint` (from `clients/dotnet`), then update `SOLANA_PAYMENT_MINT` in `.env` with the printed address. |
 | `--advance-time: deadline is Xs away — too long to sleep`    | Campaign deadline exceeds the 300 s safety cap. Re-create with `--deadline-seconds 120` (or any value ≤ 298 s after accounting for `dotnet run` startup time). |
 | `DeadlineNotPassed` immediately after `--advance-time` sleep | Solana clock lags wall clock by a few seconds. The client already adds 2 s buffer; if it still fails, increase the buffer or use a slightly longer `--deadline-seconds`. |
@@ -390,7 +406,7 @@ anchor deploy
 If you see C extension errors like `No module named 'bitarray._bitarray'`, `OSError: Cannot load native module 'Crypto.Util._cpuid_c'`, or `No module named 'ckzg'`, the venv was corrupted by packages installed from Git Bash (MinGW `.pyd` files that native Windows CPython cannot load). Delete and recreate it entirely from PowerShell:
 
 ```powershell
-cd benchmarks
+cd clients\python
 Remove-Item -Recurse -Force .venv
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -401,7 +417,7 @@ Then re-run the install steps in Step 3 below. **Always run `pip install` from P
 ### Step 3 — Python benchmark harness (PowerShell)
 
 ```powershell
-cd benchmarks
+cd clients\python
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -417,18 +433,21 @@ python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" `
     aiohttp requests pyunormalize rlp "websockets>=10.0,<16.0" `
     typing-extensions "toolz>=0.11.2,<0.12.0" ckzg
 
+# Return to repo root before running benchmark scripts
+cd ..\..
+
 # EVM lifecycle (Hardhat node must be running)
-$env:VARIANT = "V1"; $env:CLIENT = "python"; python run_tests.py --platform evm
-$env:VARIANT = "V2"; $env:CLIENT = "python"; python run_tests.py --platform evm
-$env:VARIANT = "V3"; $env:CLIENT = "python"; python run_tests.py --platform evm
+$env:VARIANT = "V1"; $env:CLIENT = "python"; python benchmarks/run_tests.py --platform evm
+$env:VARIANT = "V2"; $env:CLIENT = "python"; python benchmarks/run_tests.py --platform evm
+$env:VARIANT = "V3"; $env:CLIENT = "python"; python benchmarks/run_tests.py --platform evm
 
 # Aggregate results
-python collect_metrics.py
+python benchmarks/collect_metrics.py
 ```
 
 > **Solana benchmarks must run inside WSL**, not PowerShell. The Python harness imports `anchorpy` and `solders`, which depend on the Solana CLI and Anchor toolchain — both WSL-only on Windows.
 >
-> The PowerShell venv (`.venv/`) uses Windows `.exe` binaries and **cannot be activated in WSL**. WSL needs its own Linux venv at `.venv-linux/`.
+> The PowerShell venv (`clients\python\.venv\`) uses Windows `.exe` binaries and **cannot be activated in WSL**. WSL needs its own Linux venv — create it at `clients/python/.venv` inside WSL.
 >
 > **One-time WSL venv setup** (run once, from WSL):
 >
@@ -438,9 +457,9 @@ python collect_metrics.py
 > # Install Python 3.12 if not present
 > python3.12 --version 2>/dev/null || sudo apt-get install -y python3.12 python3.12-venv
 >
-> cd benchmarks
-> python3.12 -m venv .venv-linux
-> source .venv-linux/bin/activate
+> cd clients/python
+> python3.12 -m venv .venv
+> source .venv/bin/activate
 > python -m pip install --upgrade pip
 > python -m pip install --no-deps web3==6.20.3
 > python -m pip install lru-dict==1.3.0
@@ -456,7 +475,7 @@ python collect_metrics.py
 >
 > ```bash
 > cd "/mnt/c/Users/<your-name>/Desktop/SCHOOL/Master rad/multi-chain-crowdfunding-analyses"
-> source benchmarks/.venv-linux/bin/activate
+> source clients/python/.venv/bin/activate
 >
 > # solana-test-validator must be running (WSL terminal 1) and program deployed (Step 2)
 > VARIANT=V4 CLIENT=python python benchmarks/run_tests.py --platform solana
@@ -596,7 +615,7 @@ The Python client shares the venv from Step 3. Run from the repo root.
 
 ```powershell
 # Activate the venv (if not already active)
-.\.venv\Scripts\Activate.ps1
+clients\python\.venv\Scripts\Activate.ps1
 
 # Load .env variables into the current shell
 Get-Content .env | ForEach-Object {
@@ -612,10 +631,10 @@ $env:VARIANT = "V2"; python -m clients.python evm:contribute --amount 10000000
 $env:VARIANT = "V3"; python -m clients.python evm:contribute --amount 10000000
 ```
 
-> **Solana:** run `sol:*` commands inside WSL using the Linux venv (`.venv-linux`). See Step 3 for WSL venv setup.
+> **Solana:** run `sol:*` commands inside WSL using the Linux venv. See Step 3 for WSL venv setup.
 >
 > ```bash
-> source benchmarks/.venv-linux/bin/activate
+> source clients/python/.venv/bin/activate
 > set -a; source .env; set +a
 > VARIANT=V4 python -m clients.python sol:contribute --amount 10000000
 > VARIANT=V4 python -m clients.python sol:status
@@ -652,13 +671,13 @@ switch to `sepolia` only when `EVM_RPC_URL` points to a Sepolia RPC endpoint.
 | Topic                                                                 | Note                                                                                                                                                                                                                                                                                                  |
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python binary name**                                                | Windows installers register `python` (not `python3`). Use `python` everywhere.                                                                                                                                                                                                                        |
-| **venv activation**                                                   | `.venv\Scripts\activate` — not `source .venv/bin/activate` (that is bash syntax).                                                                                                                                                                                                                     |
+| **venv activation**                                                   | `clients\python\.venv\Scripts\activate` — not `source clients/python/.venv/bin/activate` (that is bash syntax).                                                                                                                                                                                       |
 | **Environment variables**                                             | PowerShell: `$env:VAR = "value"`. cmd: `set VAR=value`. Both must be set before the command on the same line or as separate statements.                                                                                                                                                               |
 | **Path separators**                                                   | Use `\` in PowerShell/cmd. Git Bash and WSL accept `/`. `npm run` scripts work with either.                                                                                                                                                                                                           |
 | **Solana is WSL-only**                                                | Solana CLI and Anchor have no native Windows binaries. Every `anchor`, `solana`, and `solana-test-validator` command must run inside a WSL 2 terminal.                                                                                                                                                |
 | **Cross-env file access**                                             | Your Windows files are at `/mnt/c/...` inside WSL. WSL files are at `\\wsl$\Ubuntu-22.04\home\<user>\` from Windows Explorer.                                                                                                                                                                         |
 | **Port forwarding**                                                   | WSL 2 automatically forwards localhost ports. Hardhat node on `127.0.0.1:8545` and the Solana validator on `127.0.0.1:8899` are reachable from both Windows and WSL.                                                                                                                                  |
-| **C extension load failures** (`_cpuid_c`, `_bitarray`, `ckzg`, etc.) | Packages were installed from Git Bash, which builds MinGW `.pyd` files that native Windows CPython cannot load. Fix: delete `.venv` and recreate it entirely from PowerShell — see [Recreate venv from PowerShell](#recreate-venv-from-powershell). Never run `pip install` from Git Bash on Windows. |
+| **C extension load failures** (`_cpuid_c`, `_bitarray`, `ckzg`, etc.) | Packages were installed from Git Bash, which builds MinGW `.pyd` files that native Windows CPython cannot load. Fix: delete `clients\python\.venv` and recreate it entirely from PowerShell — see [Recreate venv from PowerShell](#recreate-venv-from-powershell). Never run `pip install` from Git Bash on Windows. |
 
 ---
 
@@ -1375,7 +1394,7 @@ records per-operation cost and latency, and prints a cross-chain comparison tabl
 Due to the `lru-dict` version conflict with web3, install in stages (same as Windows):
 
 ```bash
-cd benchmarks
+cd clients/python
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -1503,8 +1522,7 @@ EVM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY \
 VARIANT=V1 CLIENT=python python benchmarks/run_tests.py --platform evm
 ```
 
-Output: `benchmarks/results/V1_python_hardhat-localnet_lifecycle.json`
-(and legacy `benchmarks/results/evm_raw.json` for backward compat).
+Output: `benchmarks/results/V1_python_hardhat-localnet_lifecycle_{TIMESTAMP}.json`
 
 #### `throughput_test.py` — Isolated TPS measurement
 
@@ -1517,7 +1535,7 @@ VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
 python benchmarks/throughput_test.py --platform solana
 ```
 
-Output: `benchmarks/results/V1_python_hardhat-localnet_throughput.json`
+Output: `benchmarks/results/V1_python_hardhat-localnet_throughput_{TIMESTAMP}.json`
 
 #### `deploy_evm.py` — Standalone EVM deployer
 
@@ -1546,20 +1564,18 @@ schema v2 result file.
 ```bash
 # ts client, V1, hardhat-localnet
 python benchmarks/run_client_benchmark.py \
-    --platform evm --client ts --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
-# → benchmarks/results/V1_ts_hardhat-localnet_lifecycle.json
+    --platform evm --client ts --variant V1 --env hardhat-localnet
+# → benchmarks/results/V1_ts_hardhat-localnet_lifecycle_{TIMESTAMP}.json
 
 # dotnet client, V1, hardhat-localnet
 python benchmarks/run_client_benchmark.py \
-    --platform evm --client dotnet --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
-# → benchmarks/results/V1_dotnet_hardhat-localnet_lifecycle.json
+    --platform evm --client dotnet --variant V1 --env hardhat-localnet
+# → benchmarks/results/V1_dotnet_hardhat-localnet_lifecycle_{TIMESTAMP}.json
 
 # ts client, V4, solana-localnet
 python benchmarks/run_client_benchmark.py \
     --platform solana --client ts --variant V4 --env solana-localnet
-# → benchmarks/results/V4_ts_solana-localnet_lifecycle.json
+# → benchmarks/results/V4_ts_solana-localnet_lifecycle_{TIMESTAMP}.json
 ```
 
 > **Cross-client gas parity:** `ts/contribute.ts` bundles `approve` + `contribute`
@@ -1574,14 +1590,13 @@ Records both `latency_ms` (client-measured elapsed) and `process_elapsed_ms`
 
 ```bash
 python benchmarks/run_throughput_client.py \
-    --platform evm --client ts --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
-# → benchmarks/results/V1_ts_hardhat-localnet_throughput.json
+    --platform evm --client ts --variant V1 --env hardhat-localnet
+# → benchmarks/results/V1_ts_hardhat-localnet_throughput_{TIMESTAMP}.json
 ```
 
 #### `collect_metrics.py` — Aggregate and compare
 
-Scans the results directory, loads all `*_lifecycle.json` files, and prints
+Scans the results directory, loads all `*_lifecycle_*.json` and `*_throughput_*.json` files, and prints
 comparison tables. Supports multiple output formats for thesis integration.
 
 ```bash
@@ -1599,10 +1614,10 @@ python benchmarks/collect_metrics.py --format latex
 python benchmarks/collect_metrics.py --format latex \
     --output benchmarks/results/thesis_table.tex
 
-# Legacy two-file mode (backward compat)
+# Legacy two-file mode (for old evm_raw / solana_raw files, if they exist)
 python benchmarks/collect_metrics.py \
-    --evm benchmarks/results/evm_raw.json \
-    --solana benchmarks/results/solana_raw.json
+    --evm benchmarks/results/evm_raw_1773957410.json \
+    --solana benchmarks/results/solana_raw_1773995694.json
 ```
 
 Output: multi-variant summary table + per-variant cross-chain operation tables.
@@ -1653,20 +1668,28 @@ Result files use the canonical schema v2 format:
 ### Result file naming
 
 ```
-benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_{kind}.json
-
-Examples:
-  V1_python_hardhat-localnet_lifecycle.json
-  V1_ts_hardhat-localnet_lifecycle.json
-  V1_dotnet_hardhat-localnet_lifecycle.json
-  V4_python_solana-localnet_lifecycle.json
-  V4_ts_solana-localnet_lifecycle.json
-  V1_python_sepolia_lifecycle.json
-  V4_python_solana-devnet_throughput.json
+benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_{KIND}_{TIMESTAMP}.json
 ```
 
-Legacy files `evm_raw.json` / `solana_raw.json` are still written by the Python
-harness for backward compatibility with old `collect_metrics.py --evm` invocations.
+where `TIMESTAMP` is a Unix epoch integer (seconds), generated by `benchmarks/config.py::results_path()` at write time.
+
+Examples:
+
+```
+V1_python_hardhat-localnet_lifecycle_1774369893.json
+V1_ts_hardhat-localnet_lifecycle_1774372940.json
+V1_dotnet_hardhat-localnet_lifecycle_1774373399.json
+V4_python_solana-localnet_lifecycle_1773995694.json
+V4_ts_solana-localnet_lifecycle_1774380000.json
+V1_python_sepolia_lifecycle_1774400000.json
+V4_python_solana-devnet_throughput_1774410000.json
+```
+
+Multiple runs for the same combination accumulate as separate files. The dashboard
+deduplicates to the latest per `(variant, client, environment, kind)` for result cards,
+and passes all runs to the Comparative Analysis chart for averaging.
+
+Legacy `evm_raw_*.json` / `solana_raw_*.json` files (schema v1) are no longer produced.
 
 ### Phase 2 — Client-layer benchmark workflow
 
@@ -1674,7 +1697,7 @@ Full end-to-end sequence for running all three clients against EVM localnet:
 
 ```bash
 REPO=/path/to/multi-chain-crowdfunding-analyses
-source $REPO/benchmarks/.venv/bin/activate
+source $REPO/clients/python/.venv/bin/activate
 cd $REPO
 
 # 1. Start Hardhat node (keep open)
@@ -1693,19 +1716,15 @@ VARIANT=V1 CLIENT=python python benchmarks/throughput_test.py --platform evm
 
 # 5. ts lifecycle + throughput
 python benchmarks/run_client_benchmark.py \
-    --platform evm --client ts --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
+    --platform evm --client ts --variant V1 --env hardhat-localnet
 python benchmarks/run_throughput_client.py \
-    --platform evm --client ts --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
+    --platform evm --client ts --variant V1 --env hardhat-localnet
 
 # 6. dotnet lifecycle + throughput
 python benchmarks/run_client_benchmark.py \
-    --platform evm --client dotnet --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
+    --platform evm --client dotnet --variant V1 --env hardhat-localnet
 python benchmarks/run_throughput_client.py \
-    --platform evm --client dotnet --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
+    --platform evm --client dotnet --variant V1 --env hardhat-localnet
 
 # 7. Collect results
 python benchmarks/collect_metrics.py --format github

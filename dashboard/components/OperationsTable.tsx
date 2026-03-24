@@ -9,7 +9,9 @@ interface Props {
 export default function OperationsTable({ operations, platform }: Props) {
   if (operations.length === 0) {
     return (
-      <p className="text-sm text-gray-500 italic">No operation records in this result file.</p>
+      <p className="text-sm text-gray-500 italic">
+        No operation records in this result file.
+      </p>
     );
   }
 
@@ -20,13 +22,18 @@ export default function OperationsTable({ operations, platform }: Props) {
           <tr className="bg-gray-900 text-left text-xs uppercase tracking-wider text-gray-500">
             <th className="px-4 py-2">Operation</th>
             <th className="px-4 py-2">Scenario</th>
-            {platform === "EVM" && <th className="px-4 py-2 text-right">Gas Used</th>}
+            {platform === "EVM" && (
+              <th className="px-4 py-2 text-right">Gas Used</th>
+            )}
             <th className="px-4 py-2 text-right">Latency</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800">
           {operations.map((op, i) => (
-            <tr key={i} className="bg-gray-950 hover:bg-gray-900/60 transition-colors">
+            <tr
+              key={i}
+              className="bg-gray-950 hover:bg-gray-900/60 transition-colors"
+            >
               <td className="px-4 py-2 font-mono text-gray-200">{op.name}</td>
               <td className="px-4 py-2 text-xs text-gray-500">{op.scenario}</td>
               {platform === "EVM" && (

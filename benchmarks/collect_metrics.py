@@ -137,8 +137,12 @@ def _load_result_file(path: pathlib.Path) -> dict | None:
 
 
 def load_all_results(results_dir: pathlib.Path) -> list[dict]:
-    """Load all lifecycle JSON files from results_dir, sorted by variant+client+env."""
-    files = sorted(results_dir.glob("*_lifecycle.json"))
+    """Load all lifecycle JSON files from results_dir, sorted by variant+client+env.
+
+    Matches both old naming (*_lifecycle.json) and new timestamped naming
+    (*_lifecycle_{timestamp}.json) via the glob pattern *_lifecycle*.json.
+    """
+    files = sorted(results_dir.glob("*_lifecycle*.json"))
     # Also include legacy evm_raw.json / solana_raw.json if no canonical files found
     if not files:
         for legacy in (config.EVM_RAW_RESULTS, config.SOLANA_RAW_RESULTS):
@@ -153,8 +157,12 @@ def load_all_results(results_dir: pathlib.Path) -> list[dict]:
 
 
 def load_throughput_results(results_dir: pathlib.Path) -> list[dict]:
-    """Load all throughput JSON files from results_dir."""
-    files = sorted(results_dir.glob("*_throughput.json"))
+    """Load all throughput JSON files from results_dir.
+
+    Matches both old naming (*_throughput.json) and new timestamped naming
+    (*_throughput_{timestamp}.json) via the glob pattern *_throughput*.json.
+    """
+    files = sorted(results_dir.glob("*_throughput*.json"))
     results = []
     for f in files:
         data = _load_result_file(f)

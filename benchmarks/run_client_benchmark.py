@@ -7,28 +7,27 @@ parses their TxOutput JSON stdout, and assembles a canonical schema_version "2" 
 Usage
 -----
     # EVM — ts-evm client, V1, hardhat-localnet
-    python benchmarks/run_client_benchmark.py \\
-        --platform evm --client ts --variant V1 --env hardhat-localnet \\
-        --deploy-json /tmp/evm_deploy.json
+    python benchmarks/run_client_benchmark.py \
+        --platform evm --client ts --variant V1 --env hardhat-localnet
 
     # EVM — dotnet client, V1, hardhat-localnet
-    python benchmarks/run_client_benchmark.py \\
-        --platform evm --client dotnet --variant V1 --env hardhat-localnet \\
-        --deploy-json /tmp/evm_deploy.json
+    python benchmarks/run_client_benchmark.py \
+        --platform evm --client dotnet --variant V1 --env hardhat-localnet
 
     # Solana — ts-solana client, V4, solana-localnet
-    python benchmarks/run_client_benchmark.py \\
+    python benchmarks/run_client_benchmark.py \
         --platform solana --client ts --variant V4 --env solana-localnet
 
     # Sepolia (requires EVM_PRIVATE_KEY and EVM_RPC_URL set)
-    EVM_RPC_URL=https://sepolia.infura.io/v3/KEY \\
-    python benchmarks/run_client_benchmark.py \\
-        --platform evm --client ts --variant V1 --env sepolia \\
-        --deploy-json /tmp/evm_deploy_sepolia.json
+    EVM_RPC_URL=https://sepolia.infura.io/v3/KEY \
+    python benchmarks/run_client_benchmark.py \
+        --platform evm --client ts --variant V1 --env sepolia
 
 Output
 ------
-  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_lifecycle.json
+  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_lifecycle_{TIMESTAMP}.json
+where TIMESTAMP is a Unix epoch integer (seconds).  Multiple runs accumulate
+as separate timestamped files; use benchmarks/collect_metrics.py to compare.
 
 Cross-client consistency note
 ------------------------------
@@ -902,7 +901,7 @@ def main() -> None:
     else:
         result = run_solana_lifecycle(args.client, variant, env_name)
 
-    out_path = config.results_path(variant, result["client"], "lifecycle", env_name)
+    out_path = config.results_path(variant, result["client"], "lifecycle", env_name, result.get("timestamp_utc"))
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as fh:
         json.dump(result, fh, indent=2)

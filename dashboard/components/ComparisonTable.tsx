@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { BenchmarkFile } from "@/lib/types";
 import { formatGas, formatFee, formatMs } from "@/lib/format";
-import { OPERATION_ORDER } from "@/lib/chart-constants";
+import { OPERATION_ORDER, VARIANT_LABELS } from "@/lib/chart-constants";
 
 interface ComparisonTableProps {
   results: BenchmarkFile[];
@@ -64,7 +64,7 @@ export function ComparisonTable({ results }: ComparisonTableProps) {
     }
   }
   const columns: (ColKey & { key: string })[] = Array.from(
-    colMap.entries()
+    colMap.entries(),
   ).map(([key, col]) => ({ key, ...col }));
 
   // ── 2. Collect unique operation names ────────────────────────────────────────
@@ -77,7 +77,9 @@ export function ComparisonTable({ results }: ComparisonTableProps) {
   // Sort by canonical order first, then alphabetically for any extras
   const operations: string[] = [
     ...OPERATION_ORDER.filter((o) => opSet.has(o)),
-    ...Array.from(opSet).filter((o) => !OPERATION_ORDER.includes(o)).sort(),
+    ...Array.from(opSet)
+      .filter((o) => !OPERATION_ORDER.includes(o))
+      .sort(),
   ];
 
   // ── 3. Build lookup: opName → colKey → CellData ──────────────────────────────
@@ -166,7 +168,7 @@ export function ComparisonTable({ results }: ComparisonTableProps) {
                 colSpan={grp.count}
                 className="px-4 py-2 text-center text-xs font-semibold text-gray-300 uppercase tracking-wider border-r border-gray-700 last:border-r-0"
               >
-                {grp.variant}
+                {VARIANT_LABELS[grp.variant] ?? grp.variant}
               </th>
             ))}
           </tr>
@@ -193,8 +195,7 @@ export function ComparisonTable({ results }: ComparisonTableProps) {
         {/* ── Body ── */}
         <tbody className="divide-y divide-gray-800">
           {sortedOps.map((opName, i) => {
-            const rowBg =
-              i % 2 === 0 ? "bg-gray-900" : "bg-gray-800/50";
+            const rowBg = i % 2 === 0 ? "bg-gray-900" : "bg-gray-800/50";
             return (
               <tr
                 key={opName}

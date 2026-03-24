@@ -13,7 +13,9 @@ Each timed operation records:
 Output
 ------
 Writes result JSON conforming to schema_version "2" to
-  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_lifecycle.json
+  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_lifecycle_{TIMESTAMP}.json
+where TIMESTAMP is a Unix epoch integer (seconds).  Multiple runs accumulate
+as separate timestamped files; the dashboard shows the latest per combination.
 
 Env vars
 --------
@@ -412,8 +414,6 @@ def run_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -> dict:
 
     out_path = config.results_path(variant, client, "lifecycle")
     _write_json(out_path, result)
-    # Also write legacy path for backward compat with collect_metrics.py --evm flag
-    _write_json(config.EVM_RAW_RESULTS, result)
     print(f"\n[evm] Done. TPS = {result['throughput']['tps']}")
     return result
 
@@ -945,8 +945,6 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
 
         out_path = config.results_path(variant, config.CLIENT, "lifecycle")
         _write_json(out_path, result)
-        # Also write legacy path for backward compat
-        _write_json(config.SOLANA_RAW_RESULTS, result)
         print(f"\n[solana] Done. TPS = {result['throughput']['tps']}")
         return result
 

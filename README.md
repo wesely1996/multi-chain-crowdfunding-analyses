@@ -93,8 +93,10 @@ anchor test
 ### Python Client
 
 ```bash
+cd clients/python
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r clients/python/requirements.txt
+pip install -r requirements.txt
+cd ../..
 
 # Standalone operations (from repo root)
 python -m clients.python evm:deploy --variant V1
@@ -105,20 +107,26 @@ python -m clients.python evm:status
 
 ### Python Benchmarks
 
+Result files are written to `benchmarks/results/` as
+`{VARIANT}_{CLIENT}_{ENV}_{KIND}_{TIMESTAMP}.json` (e.g. `V1_python_hardhat-localnet_lifecycle_1774369893.json`).
+Multiple runs accumulate; the dashboard picks the latest per combination.
+
 ```bash
 # Start Hardhat node in a separate terminal: cd contracts/evm && npx hardhat node
 VARIANT=V1 python benchmarks/run_tests.py --platform evm
 VARIANT=V2 python benchmarks/run_tests.py --platform evm
 VARIANT=V3 python benchmarks/run_tests.py --platform evm
 
+# Throughput benchmark (timed contribution phase only)
+VARIANT=V1 python benchmarks/throughput_test.py --platform evm
+
 # Start solana-test-validator + anchor deploy first
 VARIANT=V4 python benchmarks/run_tests.py --platform solana
 VARIANT=V5 python benchmarks/run_tests.py --platform solana
 
-# Subprocess-driven Python client benchmark
+# Subprocess-driven client benchmark (used internally by the dashboard run panel)
 python benchmarks/run_client_benchmark.py \
-    --platform evm --client python --variant V1 --env hardhat-localnet \
-    --deploy-json /tmp/evm_deploy.json
+    --platform evm --client python --variant V1 --env hardhat-localnet
 
 python benchmarks/collect_metrics.py    # print cross-variant comparison table
 ```

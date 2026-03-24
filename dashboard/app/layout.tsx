@@ -15,7 +15,9 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: "Multi-Chain Crowdfunding Benchmark Dashboard",
-  description: "Comparative analysis of EVM vs Solana crowdfunding contract performance",
+  description:
+    "Comparative analysis of multiple different EVM and Solana crowdfunding contract performance",
+  icons: { icon: "/favicon.ico" },
 };
 
 export default function RootLayout({

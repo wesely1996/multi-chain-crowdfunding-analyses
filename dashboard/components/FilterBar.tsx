@@ -1,7 +1,7 @@
 "use client";
 
 import { BenchmarkFile } from "@/lib/types";
-import { ALL_VARIANTS, ALL_CLIENTS } from "@/lib/chart-constants";
+import { ALL_VARIANTS, ALL_CLIENTS, VARIANT_LABELS } from "@/lib/chart-constants";
 
 interface FilterBarProps {
   results: BenchmarkFile[];
@@ -28,7 +28,9 @@ export default function FilterBar({
   setEnvironment,
   onRefresh,
 }: FilterBarProps) {
-  const environments = Array.from(new Set(results.map((r) => r.environment))).sort();
+  const environments = Array.from(
+    new Set(results.map((r) => r.environment)),
+  ).sort();
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -41,7 +43,7 @@ export default function FilterBar({
         <option value="all">All variants</option>
         {ALL_VARIANTS.map((v) => (
           <option key={v} value={v}>
-            {v}
+            {VARIANT_LABELS[v] ?? v}
           </option>
         ))}
       </select>

@@ -204,11 +204,13 @@ def _infer_env(variant: str) -> str:
         return "solana-localnet"
 
 
-def results_path(variant: str, client: str, kind: str, env: str | None = None) -> pathlib.Path:
-    """Return canonical result file path.
+def results_path(variant: str, client: str, kind: str, env: str | None = None, timestamp: int | None = None) -> pathlib.Path:
+    """Return result file path including timestamp so multiple runs accumulate.
 
     kind: "lifecycle" | "throughput"
-    e.g., V1_python_hardhat-localnet_lifecycle.json
+    e.g., V1_python_hardhat-localnet_lifecycle_1742834400.json
     """
+    import time as _time
     resolved_env = env or BENCHMARK_ENV or _infer_env(variant)
-    return RESULTS_DIR / f"{variant}_{client}_{resolved_env}_{kind}.json"
+    ts = timestamp or int(_time.time())
+    return RESULTS_DIR / f"{variant}_{client}_{resolved_env}_{kind}_{ts}.json"

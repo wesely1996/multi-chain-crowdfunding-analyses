@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { RunStatus } from "@/lib/types";
+import { RunState, RunStatus } from "@/lib/types";
+import { VARIANT_LABELS } from "@/lib/chart-constants";
 
 const VARIANTS = ["V1", "V2", "V3", "V4", "V5"] as const;
 const CLIENTS = ["python", "ts", "dotnet"] as const;
@@ -12,7 +13,9 @@ const EVM_ENVS = ["hardhat-localnet", "sepolia"] as const;
 const SOLANA_ENVS = ["solana-localnet", "solana-devnet"] as const;
 
 function defaultEnv(variant: string): string {
-  return ["V4", "V5"].includes(variant) ? "solana-localnet" : "hardhat-localnet";
+  return ["V4", "V5"].includes(variant)
+    ? "solana-localnet"
+    : "hardhat-localnet";
 }
 
 function envsForVariant(variant: string): readonly string[] {
@@ -42,8 +45,18 @@ export default function RunPanel({ onRunComplete }: Props) {
   const [output, setOutput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [history, setHistory] = useState<RunState[]>([]);
 
   const logRef = useRef<HTMLPreElement>(null);
+
+  const fetchHistory = useCallback(async () => {
+    const res = await fetch("/api/runs");
+    if (res.ok) setHistory(await res.json());
+  }, []);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   // Auto-scroll log output to bottom
   useEffect(() => {
@@ -59,9 +72,12 @@ export default function RunPanel({ onRunComplete }: Props) {
       const data = await res.json();
       setOutput(data.output ?? "");
       setStatus(data.status);
-      if (data.status === "success") onRunComplete();
+      if (data.status === "success" || data.status === "error") {
+        fetchHistory();
+        if (data.status === "success") onRunComplete();
+      }
     },
-    [onRunComplete]
+    [onRunComplete, fetchHistory],
   );
 
   useEffect(() => {
@@ -100,7 +116,9 @@ export default function RunPanel({ onRunComplete }: Props) {
     <div className="p-6 space-y-6">
       <div>
         <h2 className="text-sm font-semibold text-white">Run Benchmark</h2>
-        <p className="text-xs text-gray-500 mt-0.5">Trigger a live run against testnet</p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Trigger a live run against testnet
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -120,7 +138,7 @@ export default function RunPanel({ onRunComplete }: Props) {
           >
             {VARIANTS.map((v) => (
               <option key={v} value={v}>
-                {v}
+                {VARIANT_LABELS[v] ?? v}
               </option>
             ))}
           </select>
@@ -203,7 +221,9 @@ export default function RunPanel({ onRunComplete }: Props) {
           <div className="flex items-center gap-2">
             <StatusBadge status={status} />
             {runId && (
-              <span className="text-xs text-gray-600 font-mono">{runId.slice(0, 8)}</span>
+              <span className="text-xs text-gray-600 font-mono">
+                {runId.slice(0, 8)}
+              </span>
             )}
           </div>
 
@@ -215,6 +235,40 @@ export default function RunPanel({ onRunComplete }: Props) {
               {output}
             </pre>
           )}
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">
+            Run History
+          </p>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {history.map((run) => (
+              <div
+                key={run.id}
+                className="flex items-center justify-between rounded border border-gray-800 bg-gray-950 px-2 py-1.5 text-xs"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <StatusBadge status={run.status} />
+                  <span className="text-gray-300 font-mono truncate">
+                    {[VARIANT_LABELS[run.variant] ?? run.variant, run.client, run.environment, run.kind]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </div>
+                <span className="text-gray-600 shrink-0 ml-2">
+                  {new Date(run.startedAt).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

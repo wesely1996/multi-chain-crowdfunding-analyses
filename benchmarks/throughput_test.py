@@ -17,7 +17,9 @@ measurement reported in docs/measurements.md (M-V1-1 / M-V4-1).
 Output
 ------
 Writes a JSON record to
-  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_throughput.json
+  benchmarks/results/{VARIANT}_{CLIENT}_{ENV}_throughput_{TIMESTAMP}.json
+where TIMESTAMP is a Unix epoch integer (seconds).  Multiple runs accumulate
+as separate timestamped files; the dashboard shows the latest per combination.
 
 Env vars
 --------

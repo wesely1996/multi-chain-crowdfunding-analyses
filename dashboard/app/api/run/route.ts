@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       : ["--platform", platform, "--client", clientLabel, "--variant", variant, "--env", env];
 
   const id = randomUUID();
-  createRun(id);
+  createRun(id, { variant, client, environment: env, kind });
 
   const child = spawn(
     PYTHON,
@@ -126,8 +126,9 @@ export async function POST(req: NextRequest) {
 
   child.on("close", (code: number | null) => {
     if (code === 0) {
-      const resultFile = `benchmarks/results/${variant}_${clientLabel}_${env}_${kind}.json`;
-      completeRun(id, resultFile);
+      // Result files include a runtime timestamp in the name; the dashboard
+      // discovers them by scanning the results directory rather than by path.
+      completeRun(id);
     } else {
       failRun(id);
     }

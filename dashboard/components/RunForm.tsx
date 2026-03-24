@@ -23,10 +23,10 @@ const VARIANTS: { value: Variant; label: string }[] = [
 ];
 
 const CLIENTS: { value: Client; label: string }[] = [
-  { value: "python",      label: "python" },
+  { value: "python", label: "python" },
   { value: "test-script", label: "test script" },
-  { value: "ts",          label: "ts" },
-  { value: "dotnet",      label: "dotnet" },
+  { value: "ts", label: "ts" },
+  { value: "dotnet", label: "dotnet" },
 ];
 const KINDS: Kind[] = ["lifecycle", "throughput"];
 
@@ -78,8 +78,11 @@ export function RunForm() {
       try {
         const res = await fetch(`/api/run/${runId}`);
         if (!res.ok) return;
-        const data: { status: RunStatus; output?: string; resultFile?: string } =
-          await res.json();
+        const data: {
+          status: RunStatus;
+          output?: string;
+          resultFile?: string;
+        } = await res.json();
         setOutput(data.output ?? "");
         setResultFile(data.resultFile);
         setStatus(data.status);
@@ -124,8 +127,9 @@ export function RunForm() {
 
       {/* Note */}
       <p className="text-xs text-yellow-400 bg-yellow-900/20 border border-yellow-800 rounded px-3 py-2">
-        Note: V2 and V3 benchmarks require contract artifacts to be configured in{" "}
-        <span className="font-mono">benchmarks/config.py</span> before running.
+        Note: V2 and V3 benchmarks require contract artifacts to be configured
+        in <span className="font-mono">benchmarks/config.py</span> before
+        running.
       </p>
 
       {/* Form */}
@@ -196,7 +200,9 @@ export function RunForm() {
 
         {/* Environment */}
         <div>
-          <label htmlFor="run-env" className={LABEL_CLASS}>Environment</label>
+          <label htmlFor="run-env" className={LABEL_CLASS}>
+            Environment
+          </label>
           {isSolana ? (
             <select
               id="run-env"
@@ -205,7 +211,11 @@ export function RunForm() {
               className={SELECT_CLASS}
               disabled={isRunning}
             >
-              {SOLANA_ENVS.map((e) => <option key={e} value={e}>{e}</option>)}
+              {SOLANA_ENVS.map((e) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
             </select>
           ) : (
             <select
@@ -215,7 +225,11 @@ export function RunForm() {
               className={SELECT_CLASS}
               disabled={isRunning}
             >
-              {EVM_ENVS.map((e) => <option key={e} value={e}>{e}</option>)}
+              {EVM_ENVS.map((e) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
             </select>
           )}
         </div>
@@ -224,8 +238,9 @@ export function RunForm() {
         {solanaWindowsBlocked && (
           <p className="text-xs text-orange-400 bg-orange-900/20 border border-orange-800 rounded px-3 py-2">
             Solana benchmarks cannot run on Windows — the Python harness imports{" "}
-            <span className="font-mono">anchorpy</span> unconditionally, which requires the Solana
-            toolchain (WSL-only). Run Solana benchmarks from a WSL terminal.
+            <span className="font-mono">anchorpy</span> unconditionally, which
+            requires the Solana toolchain (WSL-only). Run Solana benchmarks from
+            a WSL terminal.
           </p>
         )}
 
@@ -260,12 +275,17 @@ export function RunForm() {
       {status === "success" && (
         <div className="space-y-1">
           <p className="text-sm">
-            <Link href="/benchmarks" className="text-green-400 hover:text-green-300 underline">
+            <Link
+              href="/benchmarks"
+              className="text-green-400 hover:text-green-300 underline"
+            >
               View Results →
             </Link>
           </p>
           {resultFile && (
-            <p className="text-xs text-gray-500 font-mono">Result file: {resultFile}</p>
+            <p className="text-xs text-gray-500 font-mono">
+              Result file: {resultFile}
+            </p>
           )}
         </div>
       )}

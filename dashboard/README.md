@@ -6,7 +6,7 @@ Next.js 14 web application for visualising multi-chain crowdfunding benchmark re
 
 - Node.js 20.x LTS
 - Benchmark result files in `benchmarks/results/` (schema v2 JSON — produced by the Python harness)
-- Python venv set up at `benchmarks/.venv` (required for the live-run API)
+- Python venv set up at `clients/python/.venv` (required for the live-run API)
 
 ## Install and run
 
@@ -35,7 +35,7 @@ npm start
 
 ## Features
 
-- **Results overview** — loads all schema v2 `*.json` files from `../benchmarks/results/`, groups by `(variant, client, environment, kind)`, shows latest file per group.
+- **Results overview** — loads all schema v2 `*.json` files from `../benchmarks/results/`, groups by `(variant, client, environment, kind)`, shows latest file per group. Files follow the naming convention `{VARIANT}_{CLIENT}_{ENV}_{KIND}_{TIMESTAMP}.json` (e.g. `V1_python_hardhat-localnet_lifecycle_1774369893.json`); the timestamp allows multiple runs to accumulate without overwriting.
 - **Filter bar** — filter by variant (V1–V5), client (python/ts/dotnet), or environment; refresh reloads from disk.
 - **Result cards** — click to drill into per-operation gas/fee, latency, and summary metric cards.
 - **Comparative charts** — side-by-side TPS and cost-per-TPS bar charts; per-operation gas/fee and latency charts.
@@ -49,8 +49,9 @@ All routes require the Node.js runtime.
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/api/benchmarks` | GET | Returns all loaded `BenchmarkFile[]` from `benchmarks/results/` |
-| `/api/run` | POST | Spawns `benchmarks/run_tests.py` as a subprocess; returns `{ id, status: "running" }` (HTTP 202) |
-| `/api/run/[id]` | GET | Returns status, stdout/stderr output, and result file path for a run |
+| `/api/run` | POST | Spawns the appropriate benchmark script as a subprocess; returns `{ id, status: "running" }` (HTTP 202) |
+| `/api/run/[id]` | GET | Returns status and stdout/stderr output for a run |
+| `/api/runs` | GET | Returns all run history entries sorted newest to oldest |
 
 ### Run request body
 
@@ -58,15 +59,34 @@ All routes require the Node.js runtime.
 {
   "variant": "V1",
   "client": "python",
-  "kind": "lifecycle"
+  "kind": "lifecycle",
+  "environment": "hardhat-localnet"
 }
 ```
 
-Valid values: `variant` = V1–V5 | `client` = python / ts / dotnet | `kind` = lifecycle / throughput
+Valid values:
+- `variant`: V1–V5 (V1–V3 are EVM; V4–V5 are Solana)
+- `client`: `python` / `ts` / `dotnet`
+- `kind`: `lifecycle` / `throughput`
+- `environment`: `hardhat-localnet` / `sepolia` (EVM) | `solana-localnet` / `solana-devnet` (Solana)
+
+The API selects the script automatically:
+- `lifecycle` → `benchmarks/run_client_benchmark.py`
+- `throughput` → `benchmarks/run_throughput_client.py`
 
 ## Result file discovery
 
 The dashboard resolves `../benchmarks/results` relative to its working directory. Start the server from `dashboard/` so this path is correct. Only schema v2 files (`"schema_version": "2"`) are displayed; legacy files are silently skipped.
+
+Result files follow the naming convention:
+
+```
+{VARIANT}_{CLIENT}_{ENV}_{KIND}_{TIMESTAMP}.json
+```
+
+Example: `V1_python_hardhat-localnet_lifecycle_1774369893.json`
+
+The timestamp (Unix epoch seconds) is embedded by `benchmarks/config.py::results_path()` at write time. Multiple runs for the same combination accumulate as separate files; the dashboard deduplicates to the latest for cards and passes all runs to the Comparative Analysis chart for averaging.
 
 ## Notes
 
@@ -92,7 +112,7 @@ npx hardhat node
 
 **Python venv (from repo root, once):**
 ```powershell
-cd benchmarks
+cd clients\python
 python -m venv .venv
 .venv\Scripts\activate
 python -m pip install --no-deps web3==6.20.3
@@ -155,7 +175,7 @@ anchor deploy
 **Run benchmarks from WSL:**
 ```bash
 cd /mnt/c/<path-to-repo>
-source benchmarks/.venv/bin/activate
+source clients/python/.venv/bin/activate
 VARIANT=V4 python benchmarks/run_tests.py --platform solana
 VARIANT=V5 python benchmarks/run_tests.py --platform solana
 ```

@@ -31,12 +31,16 @@ export function ThroughputChart({ results }: ThroughputChartProps) {
   return (
     <div className="w-full">
       <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
-          <XAxis
-            dataKey="name"
-            tick={{ fill: "#9ca3af", fontSize: 11 }}
+        <BarChart
+          data={data}
+          margin={{ top: 8, right: 16, left: 0, bottom: 4 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke="#374151"
+            vertical={false}
           />
+          <XAxis dataKey="name" tick={{ fill: "#9ca3af", fontSize: 11 }} />
           <YAxis
             tick={{ fill: "#9ca3af", fontSize: 11 }}
             label={{
@@ -53,12 +57,9 @@ export function ThroughputChart({ results }: ThroughputChartProps) {
             itemStyle={{ color: "#9ca3af" }}
             content={({ active, payload, label }) => {
               if (!active || !payload || payload.length === 0) return null;
-              const entry = payload[0].payload as typeof data[number];
+              const entry = payload[0].payload as (typeof data)[number];
               return (
-                <div
-                  style={TOOLTIP_STYLE}
-                  className="px-3 py-2"
-                >
+                <div style={TOOLTIP_STYLE} className="px-3 py-2">
                   <p style={{ color: "#e5e7eb", marginBottom: 4 }}>{label}</p>
                   <p style={{ color: "#9ca3af" }}>
                     TPS: {formatTps(entry.tps)}
@@ -78,10 +79,7 @@ export function ThroughputChart({ results }: ThroughputChartProps) {
           />
           <Bar dataKey="tps" name="TPS" radius={[3, 3, 0, 0]}>
             {data.map((entry, i) => (
-              <Cell
-                key={i}
-                fill={VARIANT_COLORS[entry.variant] ?? "#6b7280"}
-              />
+              <Cell key={i} fill={VARIANT_COLORS[entry.variant] ?? "#6b7280"} />
             ))}
           </Bar>
         </BarChart>

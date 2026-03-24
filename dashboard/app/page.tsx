@@ -36,7 +36,8 @@ function EmptyState() {
       <p className="text-gray-400 font-medium">No benchmark results found</p>
       <p className="text-sm text-gray-600 mt-1">
         Use the Run Benchmark panel to generate results, or verify that{" "}
-        <code className="text-gray-500">benchmarks/results/</code> contains valid JSON files.
+        <code className="text-gray-500">benchmarks/results/</code> contains
+        valid JSON files.
       </p>
     </div>
   );
@@ -67,25 +68,35 @@ function ResultCard({ result, isSelected, onClick }: ResultCardProps) {
         <span className="font-mono text-sm font-semibold text-white">
           {result.variant} · {result.client}
         </span>
-        <span className={`text-xs px-2 py-0.5 rounded font-mono ${platformBadge}`}>
+        <span
+          className={`text-xs px-2 py-0.5 rounded font-mono ${platformBadge}`}
+        >
           {result.platform}
         </span>
       </div>
 
-      <p className="text-xs text-gray-500 mb-2">{result.environment}</p>
+      <p className="text-xs text-gray-500 mb-2">
+        {result.environment} - {formatTimestamp(result.timestamp_utc)}
+      </p>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         <div className="flex justify-between">
           <span className="text-gray-500">TPS</span>
-          <span className="font-mono text-green-400">{formatTps(result.throughput.tps)}</span>
+          <span className="font-mono text-green-400">
+            {formatTps(result.throughput.tps)}
+          </span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-500">Ops</span>
-          <span className="font-mono text-gray-300">{result.operations.length}</span>
+          <span className="font-mono text-gray-300">
+            {result.operations.length}
+          </span>
         </div>
         <div className="flex justify-between col-span-2">
           <span className="text-gray-500">Cost/TPS</span>
-          <span className="font-mono text-yellow-400">{deriveCostPerTps(result)}</span>
+          <span className="font-mono text-yellow-400">
+            {deriveCostPerTps(result)}
+          </span>
         </div>
       </div>
     </button>
@@ -112,7 +123,9 @@ function ResultDetail({ result }: ResultDetailProps) {
         <h2 className="text-xs uppercase tracking-widest text-gray-500">
           Detail — {result.variant} / {result.client} / {result.environment}
         </h2>
-        <span className="text-xs text-gray-600">{formatTimestamp(result.timestamp_utc)}</span>
+        <span className="text-xs text-gray-600">
+          {formatTimestamp(result.timestamp_utc)}
+        </span>
       </div>
 
       {/* Key metric cards */}
@@ -133,7 +146,11 @@ function ResultDetail({ result }: ResultDetailProps) {
           value={String(result.throughput.num_contributions)}
           variant={result.variant}
         />
-        <MetricCard label={avgFeeLabel} value={avgFeeValue} variant={result.variant} />
+        <MetricCard
+          label={avgFeeLabel}
+          value={avgFeeValue}
+          variant={result.variant}
+        />
       </div>
 
       {/* Cost-to-performance highlight — the thesis' primary comparison metric */}
@@ -154,7 +171,9 @@ function ResultDetail({ result }: ResultDetailProps) {
       {/* Limitations */}
       {result.limitations.length > 0 && (
         <div className="rounded border border-orange-900 bg-orange-900/10 px-4 py-3">
-          <p className="text-xs text-orange-400 font-medium mb-1">Limitations</p>
+          <p className="text-xs text-orange-400 font-medium mb-1">
+            Limitations
+          </p>
           <ul className="space-y-0.5">
             {result.limitations.map((note, i) => (
               <li key={i} className="text-xs text-orange-300/70">
@@ -167,8 +186,13 @@ function ResultDetail({ result }: ResultDetailProps) {
 
       {/* Per-operation breakdown */}
       <div>
-        <h3 className="text-xs uppercase tracking-widest text-gray-500 mb-2">Operations</h3>
-        <OperationsTable operations={result.operations} platform={result.platform} />
+        <h3 className="text-xs uppercase tracking-widest text-gray-500 mb-2">
+          Operations
+        </h3>
+        <OperationsTable
+          operations={result.operations}
+          platform={result.platform}
+        />
       </div>
     </section>
   );
@@ -212,6 +236,20 @@ export default function DashboardPage() {
     return true;
   });
 
+  // Deduplicated view for result cards — latest per (variant, client, environment, kind).
+  const latestFiltered = (() => {
+    const seen = new Map<string, BenchmarkFile>();
+    for (const r of filtered) {
+      const key = `${r.variant}_${r.client}_${r.environment}_${r.kind}`;
+      const existing = seen.get(key);
+      if (!existing || r.timestamp_utc > existing.timestamp_utc)
+        seen.set(key, r);
+    }
+    return Array.from(seen.values()).sort(
+      (a, b) => b.timestamp_utc - a.timestamp_utc,
+    );
+  })();
+
   // Keep the selected result valid after filter or data changes
   useEffect(() => {
     if (!selected || !filtered.includes(selected)) {
@@ -228,7 +266,8 @@ export default function DashboardPage() {
           Multi-Chain Crowdfunding Benchmark Dashboard
         </h1>
         <p className="text-xs text-gray-500 mt-0.5">
-          EVM (Sepolia) vs Solana (Devnet) — gas · latency · throughput · cost efficiency
+          EVM (Sepolia) vs Solana (Devnet) — gas · latency · throughput · cost
+          efficiency
         </p>
       </header>
 
@@ -247,7 +286,9 @@ export default function DashboardPage() {
           />
 
           {loading && (
-            <p className="text-sm text-gray-500 animate-pulse">Loading results…</p>
+            <p className="text-sm text-gray-500 animate-pulse">
+              Loading results…
+            </p>
           )}
 
           {fetchError && (
@@ -260,15 +301,15 @@ export default function DashboardPage() {
 
           {filtered.length > 0 && (
             <>
-              {/* Clickable result cards — one per benchmark file */}
+              {/* Clickable result cards — latest run per (variant, client, environment, kind) */}
               <section>
                 <h2 className="text-xs uppercase tracking-widest text-gray-500 mb-3">
-                  Results ({filtered.length})
+                  Results ({latestFiltered.length})
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[340px] overflow-y-auto pr-1">
-                  {filtered.map((r) => (
+                  {latestFiltered.map((r) => (
                     <ResultCard
-                      key={`${r.variant}_${r.client}_${r.environment}_${r.kind ?? r.timestamp_utc}`}
+                      key={r.timestamp_utc}
                       result={r}
                       isSelected={selected === r}
                       onClick={() => setSelected(r)}
@@ -277,8 +318,8 @@ export default function DashboardPage() {
                 </div>
               </section>
 
-              {/* Side-by-side charts — only meaningful with 2+ results */}
-              {filtered.length > 1 && <CompareChart results={filtered} />}
+              {/* Comparative Analysis — all runs passed so average mode uses full history */}
+              {latestFiltered.length > 1 && <CompareChart results={filtered} />}
 
               {/* Full detail for the selected result */}
               {selected && <ResultDetail result={selected} />}
