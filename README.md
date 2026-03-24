@@ -139,6 +139,9 @@ npm install
 npm run dev        # open http://localhost:3000
 ```
 
+<img width="1917" height="917" alt="image" src="https://github.com/user-attachments/assets/a0773a0a-8a00-411b-8854-790c6ea9c3ff" />
+
+
 ## Documentation
 
 | File | Contents |
