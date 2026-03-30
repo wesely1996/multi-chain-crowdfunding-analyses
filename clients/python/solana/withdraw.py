@@ -12,13 +12,13 @@ import asyncio
 import sys
 
 from clients.python.solana import config as sol_config
-from clients.python.solana.client import get_client, load_keypair, find_pda, send_and_confirm, get_fee
+from clients.python.solana.client import get_client, load_keypair, find_pda, send_and_confirm, get_fee, load_idl
 from clients.python.shared.output import TxOutput, print_result, print_error, _now_iso, ms
 
 
 async def _withdraw(variant: str) -> TxOutput:
     """Call withdraw_milestone on the campaign."""
-    from anchorpy import Program, Provider, Wallet, Idl, Context
+    from anchorpy import Program, Provider, Wallet, Context
     from solders.pubkey import Pubkey
     from spl.token.constants import TOKEN_PROGRAM_ID
     from spl.token.instructions import get_associated_token_address
@@ -35,8 +35,7 @@ async def _withdraw(variant: str) -> TxOutput:
     wallet = Wallet(creator)
     provider = Provider(client, wallet)
 
-    with open(py_idl_path) as fh:
-        idl = Idl.from_json(fh.read())
+    idl = load_idl(py_idl_path)
     program = Program(idl, program_id, provider)
 
     campaign_addr = sol_config.SOLANA_CAMPAIGN_PDA

@@ -1,14 +1,11 @@
 import { parseArgs } from "node:util";
 import { PublicKey } from "@solana/web3.js";
-import BN from "bn.js";
 import {
   connection,
   wallet,
   program,
-  SOLANA_CAMPAIGN_ADDRESS,
-  SOLANA_CAMPAIGN_ID,
 } from "./config.js";
-import { campaignPda, contributorRecordPda } from "./pda.js";
+import { contributorRecordPda, resolveCampaign } from "./pda.js";
 import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
@@ -22,15 +19,7 @@ const { values } = parseArgs({
 async function main() {
   const start = performance.now();
 
-  // Resolve campaign address: explicit > env SOLANA_CAMPAIGN_ADDRESS > derive from wallet+id
-  let campaignAddr: PublicKey;
-  if (values["campaign"]) {
-    campaignAddr = new PublicKey(values["campaign"]);
-  } else if (SOLANA_CAMPAIGN_ADDRESS) {
-    campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
-  } else {
-    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
-  }
+  const campaignAddr = resolveCampaign(values["campaign"], wallet.publicKey);
 
   const campaignAccount = await (program.account as any).campaign.fetch(campaignAddr);
 

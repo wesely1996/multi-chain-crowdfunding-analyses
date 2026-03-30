@@ -8,6 +8,7 @@ helpers (make_op_record) remain in the benchmark scripts.
 
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 from typing import Any
@@ -28,14 +29,16 @@ def get_web3(rpc_url: str | None = None):
     return w3
 
 
+@functools.lru_cache(maxsize=None)
 def load_abi(artifact_path: Path) -> list:
-    """Load ABI array from a Hardhat artifact JSON file."""
+    """Load ABI array from a Hardhat artifact JSON file. Cached — do not mutate the result."""
     with open(artifact_path) as f:
         return json.load(f)["abi"]
 
 
+@functools.lru_cache(maxsize=None)
 def load_artifact(artifact_path: Path) -> dict:
-    """Load the full Hardhat artifact JSON (abi + bytecode)."""
+    """Load the full Hardhat artifact JSON (abi + bytecode). Cached — do not mutate the result."""
     with open(artifact_path) as f:
         return json.load(f)
 

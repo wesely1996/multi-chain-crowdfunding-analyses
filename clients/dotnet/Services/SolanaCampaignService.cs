@@ -192,19 +192,23 @@ public class SolanaCampaignService
         var vault = PdaHelper.VaultPda(campaign, _programId);
         var creatorPaymentAta = PdaHelper.AssociatedTokenAddress(_signer.PublicKey, _paymentMint, _tokenProgram);
 
-        // Read state before for milestone index
-        var before = await FetchCampaignState(campaign);
-        var milestoneIndex = before?["currentMilestone"];
+        // Read pre-tx state: milestone index, percentages, and running totals
+        var before         = await FetchCampaignState(campaign);
+        var mIdx           = (int)(before?["currentMilestone"] ?? 0);
+        var milestoneCount = (int)(before?["milestoneCount"] ?? 0);
+        var totalRaised    = ulong.Parse(before?["totalRaised"]?.ToString()    ?? "0");
+        var totalWithdrawn = ulong.Parse(before?["totalWithdrawn"]?.ToString() ?? "0");
+        var milestones     = (before?["milestones"] as List<int>) ?? new List<int>();
 
         var ix = InstructionBuilder.WithdrawMilestone(
             _programId, _signer.PublicKey, campaign, vault, creatorPaymentAta, _paymentMint,
             _tokenProgram);
         var result = await TransactionHelper.SendAndConfirm(_rpc, _signer, ix);
 
-        var after = await FetchCampaignState(campaign);
-        var beforeWithdrawn = ulong.Parse(before?["totalWithdrawn"]?.ToString() ?? "0");
-        var afterWithdrawn = ulong.Parse(after?["totalWithdrawn"]?.ToString() ?? "0");
-        var amount = afterWithdrawn - beforeWithdrawn;
+        // Mirror on-chain math: last milestone sweeps remainder, others take their percentage
+        ulong amount = (mIdx >= milestoneCount - 1)
+            ? totalRaised - totalWithdrawn
+            : totalRaised * (ulong)milestones[mIdx] / 100;
 
         return new TxOutput
         {
@@ -217,10 +221,10 @@ public class SolanaCampaignService
             ElapsedMs = result.ElapsedMs,
             Data = new()
             {
-                ["error"] = result.ErrorCode,
-                ["milestoneIndex"] = milestoneIndex,
-                ["amount"] = amount.ToString(),
-                ["campaignAddress"] = campaign.Key,
+                ["error"]          = result.ErrorCode,
+                ["milestoneIndex"] = mIdx,
+                ["amount"]         = amount.ToString(),
+                ["campaignAddress"]= campaign.Key,
             }
         };
     }

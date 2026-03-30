@@ -11,12 +11,10 @@ import {
   program,
   sendAndConfirmTx,
   paymentMint,
-  SOLANA_CAMPAIGN_ADDRESS,
-  SOLANA_CAMPAIGN_ID,
   DECIMALS,
   tokenProgram,
 } from "./config.js";
-import { campaignPda, vaultPda, receiptMintPda } from "./pda.js";
+import { vaultPda, receiptMintPda, resolveCampaign } from "./pda.js";
 import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
@@ -30,14 +28,7 @@ const { values } = parseArgs({
 async function main() {
   const amountRaw = new BN(Math.round(Number(values["amount"]!) * 10 ** DECIMALS));
 
-  let campaignAddr: PublicKey;
-  if (values["campaign"]) {
-    campaignAddr = new PublicKey(values["campaign"]);
-  } else if (SOLANA_CAMPAIGN_ADDRESS) {
-    campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
-  } else {
-    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
-  }
+  const campaignAddr = resolveCampaign(values["campaign"], wallet.publicKey);
 
   const vault = vaultPda(campaignAddr);
   const receiptMint = receiptMintPda(campaignAddr);

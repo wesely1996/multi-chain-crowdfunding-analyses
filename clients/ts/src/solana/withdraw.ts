@@ -1,6 +1,5 @@
 import { parseArgs } from "node:util";
 import { PublicKey } from "@solana/web3.js";
-import BN from "bn.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   connection,
@@ -8,11 +7,9 @@ import {
   program,
   sendAndConfirmTx,
   paymentMint,
-  SOLANA_CAMPAIGN_ADDRESS,
-  SOLANA_CAMPAIGN_ID,
   tokenProgram,
 } from "./config.js";
-import { campaignPda, vaultPda } from "./pda.js";
+import { vaultPda, resolveCampaign } from "./pda.js";
 import { printResult, printError } from "../shared/output.js";
 
 const { values } = parseArgs({
@@ -23,21 +20,9 @@ const { values } = parseArgs({
 });
 
 async function main() {
-  let campaignAddr: PublicKey;
-  if (values["campaign"]) {
-    campaignAddr = new PublicKey(values["campaign"]);
-  } else if (SOLANA_CAMPAIGN_ADDRESS) {
-    campaignAddr = new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
-  } else {
-    campaignAddr = campaignPda(wallet.publicKey, new BN(Number(SOLANA_CAMPAIGN_ID)));
-  }
-
+  const campaignAddr = resolveCampaign(values["campaign"], wallet.publicKey);
   const vault = vaultPda(campaignAddr);
   const creatorPaymentAta = getAssociatedTokenAddressSync(paymentMint, wallet.publicKey);
-
-  // Read milestone index before withdraw
-  const before = await (program.account as any).campaign.fetch(campaignAddr);
-  const milestoneIndex = before.currentMilestone;
 
   const start = performance.now();
 
@@ -58,14 +43,22 @@ async function main() {
 
   const elapsed = performance.now() - start;
 
-  const tx = await connection.getTransaction(sig, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
+  // getTransaction and account fetch are independent — run them in parallel
+  const [tx, after] = await Promise.all([
+    connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }),
+    (program.account as any).campaign.fetch(campaignAddr),
+  ]);
 
-  // Read updated state to get withdrawn amount
-  const after = await (program.account as any).campaign.fetch(campaignAddr);
-  const amount = after.totalWithdrawn.sub(before.totalWithdrawn);
+  // Program increments currentMilestone during withdraw_milestone, so subtract 1
+  const milestoneIndex = Number(after.currentMilestone) - 1;
+
+  // Derive amount from vault token balance delta embedded in the transaction metadata
+  const vaultIndex = tx?.transaction.message.accountKeys.findIndex(
+    (k: PublicKey) => k.equals(vault),
+  ) ?? -1;
+  const preBal  = tx?.meta?.preTokenBalances?.find( (b: any) => b.accountIndex === vaultIndex)?.uiTokenAmount.amount ?? "0";
+  const postBal = tx?.meta?.postTokenBalances?.find((b: any) => b.accountIndex === vaultIndex)?.uiTokenAmount.amount ?? "0";
+  const amount  = BigInt(preBal) - BigInt(postBal);
 
   printResult({
     chain: "solana",

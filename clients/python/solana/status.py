@@ -13,13 +13,13 @@ import json
 import sys
 
 from clients.python.solana import config as sol_config
-from clients.python.solana.client import get_client, load_keypair
+from clients.python.solana.client import get_client, load_keypair, load_idl
 from clients.python.shared.output import _now_iso, print_error
 
 
 async def _status(variant: str) -> dict:
     """Read and return campaign state as a dict."""
-    from anchorpy import Program, Provider, Wallet, Idl
+    from anchorpy import Program, Provider, Wallet
     from solders.pubkey import Pubkey
 
     py_idl_path, program_id_str = sol_config.SOLANA_VARIANT_ARTIFACTS[variant]
@@ -30,8 +30,7 @@ async def _status(variant: str) -> dict:
     wallet = Wallet(payer)
     provider = Provider(client, wallet)
 
-    with open(py_idl_path) as fh:
-        idl = Idl.from_json(fh.read())
+    idl = load_idl(py_idl_path)
     program = Program(idl, program_id, provider)
 
     campaign_addr = sol_config.SOLANA_CAMPAIGN_PDA

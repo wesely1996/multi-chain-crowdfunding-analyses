@@ -9,6 +9,7 @@ Benchmark-specific helpers (make_op_record) remain in the benchmark scripts.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 from typing import Any
 
@@ -71,3 +72,11 @@ async def get_fee(client, sig) -> int:
     if resp.value and resp.value.transaction.meta:
         return resp.value.transaction.meta.fee
     return 0
+
+
+@functools.lru_cache(maxsize=None)
+def load_idl(idl_path):
+    """Load and cache an Anchor IDL from a JSON file. One file read per unique path."""
+    from anchorpy import Idl
+    with open(idl_path) as fh:
+        return Idl.from_json(fh.read())

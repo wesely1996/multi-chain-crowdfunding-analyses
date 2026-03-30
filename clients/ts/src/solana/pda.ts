@@ -1,6 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
-import { programId } from "./config.js";
+import { programId, SOLANA_CAMPAIGN_ADDRESS, SOLANA_CAMPAIGN_ID } from "./config.js";
 
 export function campaignPda(creator: PublicKey, campaignId: BN): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
@@ -32,4 +32,13 @@ export function contributorRecordPda(campaign: PublicKey, contributor: PublicKey
     programId,
   );
   return pda;
+}
+
+/**
+ * Resolve campaign address from: explicit arg > SOLANA_CAMPAIGN_ADDRESS env > PDA derivation.
+ */
+export function resolveCampaign(explicit: string | undefined, walletPubkey: PublicKey): PublicKey {
+  if (explicit) return new PublicKey(explicit);
+  if (SOLANA_CAMPAIGN_ADDRESS) return new PublicKey(SOLANA_CAMPAIGN_ADDRESS);
+  return campaignPda(walletPubkey, new BN(Number(SOLANA_CAMPAIGN_ID)));
 }

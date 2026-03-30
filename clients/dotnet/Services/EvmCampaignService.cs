@@ -360,42 +360,54 @@ public class EvmCampaignService
         var sw = Stopwatch.StartNew();
         var campaign = _web3.Eth.GetContract(GetCampaignAbi(), _campaignAddress);
 
-        var creator = await campaign.GetFunction("creator").CallAsync<string>();
-        var softCap = await campaign.GetFunction("softCap").CallAsync<BigInteger>();
-        var hardCap = await campaign.GetFunction("hardCap").CallAsync<BigInteger>();
-        var deadline = await campaign.GetFunction("deadline").CallAsync<BigInteger>();
-        var totalRaised = await campaign.GetFunction("totalRaised").CallAsync<BigInteger>();
-        var totalWithdrawn = await campaign.GetFunction("totalWithdrawn").CallAsync<BigInteger>();
-        var finalized = await campaign.GetFunction("finalized").CallAsync<bool>();
-        var successful = await campaign.GetFunction("successful").CallAsync<bool>();
-        var currentMilestone = await campaign.GetFunction("currentMilestone").CallAsync<byte>();
-        var milestoneCount = await campaign.GetFunction("getMilestoneCount").CallAsync<BigInteger>();
-        var milestonePercentages = await campaign.GetFunction("getMilestonePercentages").CallAsync<List<byte>>();
-        var paymentToken = await campaign.GetFunction("paymentToken").CallAsync<string>();
-        var receiptToken = await campaign.GetFunction("receiptToken").CallAsync<string>();
+        var creatorTask              = campaign.GetFunction("creator").CallAsync<string>();
+        var softCapTask              = campaign.GetFunction("softCap").CallAsync<BigInteger>();
+        var hardCapTask              = campaign.GetFunction("hardCap").CallAsync<BigInteger>();
+        var deadlineTask             = campaign.GetFunction("deadline").CallAsync<BigInteger>();
+        var totalRaisedTask          = campaign.GetFunction("totalRaised").CallAsync<BigInteger>();
+        var totalWithdrawnTask       = campaign.GetFunction("totalWithdrawn").CallAsync<BigInteger>();
+        var finalizedTask            = campaign.GetFunction("finalized").CallAsync<bool>();
+        var successfulTask           = campaign.GetFunction("successful").CallAsync<bool>();
+        var currentMilestoneTask     = campaign.GetFunction("currentMilestone").CallAsync<byte>();
+        var milestoneCountTask       = campaign.GetFunction("getMilestoneCount").CallAsync<BigInteger>();
+        var milestonePercentagesTask = campaign.GetFunction("getMilestonePercentages").CallAsync<List<byte>>();
+        var paymentTokenTask         = campaign.GetFunction("paymentToken").CallAsync<string>();
+        var receiptTokenTask         = campaign.GetFunction("receiptToken").CallAsync<string>();
+
+        Task<BigInteger>? contributionTask = null;
+        if (!string.IsNullOrEmpty(contributorAddress))
+            contributionTask = campaign.GetFunction("contributions").CallAsync<BigInteger>(contributorAddress);
+
+        var allTasks = new List<Task>
+        {
+            creatorTask, softCapTask, hardCapTask, deadlineTask,
+            totalRaisedTask, totalWithdrawnTask, finalizedTask, successfulTask,
+            currentMilestoneTask, milestoneCountTask, milestonePercentagesTask,
+            paymentTokenTask, receiptTokenTask,
+        };
+        if (contributionTask != null) allTasks.Add(contributionTask);
+        await Task.WhenAll(allTasks);
 
         var data = new Dictionary<string, object?>
         {
-            ["creator"] = creator,
-            ["softCap"] = softCap.ToString(),
-            ["hardCap"] = hardCap.ToString(),
-            ["deadline"] = deadline.ToString(),
-            ["totalRaised"] = totalRaised.ToString(),
-            ["totalWithdrawn"] = totalWithdrawn.ToString(),
-            ["finalized"] = finalized,
-            ["successful"] = successful,
-            ["currentMilestone"] = (int)currentMilestone,
-            ["milestoneCount"] = milestoneCount.ToString(),
-            ["milestonePercentages"] = milestonePercentages.Select(b => (int)b).ToList(),
-            ["paymentToken"] = paymentToken,
-            ["receiptToken"] = receiptToken,
+            ["creator"]              = creatorTask.Result,
+            ["softCap"]              = softCapTask.Result.ToString(),
+            ["hardCap"]              = hardCapTask.Result.ToString(),
+            ["deadline"]             = deadlineTask.Result.ToString(),
+            ["totalRaised"]          = totalRaisedTask.Result.ToString(),
+            ["totalWithdrawn"]       = totalWithdrawnTask.Result.ToString(),
+            ["finalized"]            = finalizedTask.Result,
+            ["successful"]           = successfulTask.Result,
+            ["currentMilestone"]     = (int)currentMilestoneTask.Result,
+            ["milestoneCount"]       = milestoneCountTask.Result.ToString(),
+            ["milestonePercentages"] = milestonePercentagesTask.Result.Select(b => (int)b).ToList(),
+            ["paymentToken"]         = paymentTokenTask.Result,
+            ["receiptToken"]         = receiptTokenTask.Result,
         };
 
-        if (!string.IsNullOrEmpty(contributorAddress))
+        if (contributionTask != null)
         {
-            var contribution = await campaign.GetFunction("contributions")
-                .CallAsync<BigInteger>(contributorAddress);
-            data["contribution"] = contribution.ToString();
+            data["contribution"]       = contributionTask.Result.ToString();
             data["contributorAddress"] = contributorAddress;
         }
 
