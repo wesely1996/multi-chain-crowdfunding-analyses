@@ -156,7 +156,7 @@ Results appear under `/benchmarks` after the run completes.
 
 ### Solana combinations (WSL only)
 
-The dashboard disables Solana variants on Windows — the Python harness imports `anchorpy` unconditionally, which requires the Solana toolchain (WSL-only). Run these from WSL directly.
+The dashboard disables Solana variants (V4, V5) when accessed from a Windows browser — the Python harness imports `anchorpy` unconditionally, which requires the Solana toolchain available only in WSL. To use the dashboard UI for Solana runs, start the Next.js server from WSL so the browser connects via a non-Windows user agent.
 
 **WSL Terminal A — validator (keep running):**
 ```bash
@@ -164,7 +164,7 @@ The dashboard disables Solana variants on Windows — the Python harness imports
 solana-test-validator --reset
 ```
 
-**WSL Terminal B — build and deploy programs:**
+**WSL Terminal B — build and deploy programs (once per reset):**
 ```bash
 cd /mnt/c/<path-to-repo>/contracts/solana
 npm install
@@ -172,7 +172,15 @@ anchor build
 anchor deploy
 ```
 
-**Run benchmarks from WSL:**
+**WSL Terminal C — dashboard (keep running):**
+```bash
+cd /mnt/c/<path-to-repo>/dashboard
+npm run dev    # open http://localhost:3000/run
+```
+
+Open `http://localhost:3000/run` in your browser, select **V4** or **V5**, choose `solana-localnet` or `solana-devnet`, pick a client and kind, then click **Start Run**. The Windows block is not triggered when the server runs under WSL.
+
+**Alternative — run benchmarks directly from WSL (no dashboard):**
 ```bash
 cd /mnt/c/<path-to-repo>
 source clients/python/.venv/bin/activate

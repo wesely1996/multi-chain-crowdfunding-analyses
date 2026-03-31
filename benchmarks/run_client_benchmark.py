@@ -183,7 +183,7 @@ def _evm_setup_mint_tokens(deploy_json: dict) -> None:
         w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(signed.rawTransaction))
 
     n_total = config.N_CONTRIBUTIONS + 5  # success contributors + refund contributors
-    print(f"[evm_setup] Minting tokens to {n_total} contributor accounts...")
+    print(f"[evm_setup] Minting tokens to {n_total} contributor accounts...", flush=True)
     _setup_seed = _evm_seed()
     for i in range(1, n_total + 1):
         acc, _ = _evm_account_from_index(i, _setup_seed)
@@ -191,9 +191,9 @@ def _evm_setup_mint_tokens(deploy_json: dict) -> None:
             "from": deployer.address,
         }), deployer)
         if i % 10 == 0:
-            print(f"  {i} / {n_total}")
+            print(f"  {i} / {n_total}", flush=True)
 
-    print("[evm_setup] Token minting complete.")
+    print("[evm_setup] Token minting complete.", flush=True)
 
 
 def _derive_evm_contributor_key(index: int) -> str:
@@ -237,8 +237,8 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
     _evm_setup_mint_tokens(deploy_json)
 
     # ── SUCCESS PATH: 50 × contribute ─────────────────────────────────────────
-    print(f"\n[{client}] --- SUCCESS PATH ---")
-    print(f"[{client}] Running {config.N_CONTRIBUTIONS} timed contribute() calls...")
+    print(f"\n[{client}] --- SUCCESS PATH ---", flush=True)
+    print(f"[{client}] Running {config.N_CONTRIBUTIONS} timed contribute() calls...", flush=True)
     amount_str = str(config.CONTRIB_AMOUNT // (10 ** config.DECIMALS))  # in token units
 
     for i in range(1, config.N_CONTRIBUTIONS + 1):
@@ -270,7 +270,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
             "tx_hash": output.get("data", {}).get("contributeTxHash") or output.get("txHash"),
         })
         if i % 10 == 0:
-            print(f"  {i} / {config.N_CONTRIBUTIONS}")
+            print(f"  {i} / {config.N_CONTRIBUTIONS}", flush=True)
 
     # ── Advance time past deadline (hardhat only) ────────────────────────────
     if "localnet" in env_name or "hardhat" in env_name:
@@ -282,10 +282,10 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
             w3.provider.make_request("evm_increaseTime", [config.DEADLINE_DAYS * 86400 + 1])
             w3.provider.make_request("evm_mine", [])
         except Exception as exc:
-            print(f"[warn] evm_increaseTime failed: {exc}", file=sys.stderr)
+            print(f"[warn] evm_increaseTime failed: {exc}", file=sys.stderr, flush=True)
 
     # ── finalize ──────────────────────────────────────────────────────────────
-    print(f"[{client}] finalize()...")
+    print(f"[{client}] finalize()...", flush=True)
     env = {**base_env, "PRIVATE_KEY": deployer_key}
     output, proc_ms = _client_run("finalize", [], env)
     operations.append({
@@ -300,7 +300,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
 
     # ── withdrawMilestone × 3 ────────────────────────────────────────────────
     for m in range(len(config.MILESTONES)):
-        print(f"[{client}] withdraw() #{m}...")
+        print(f"[{client}] withdraw() #{m}...", flush=True)
         output, proc_ms = _client_run("withdraw", [], env)
         operations.append({
             "name": f"withdrawMilestone_{m}",
@@ -314,8 +314,8 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
 
     # ── REFUND PATH ───────────────────────────────────────────────────────────
     # Deploy a new campaign with unreachable softCap for refund testing
-    print(f"\n[{client}] --- REFUND PATH ---")
-    print(f"[{client}] Deploying refund campaign...")
+    print(f"\n[{client}] --- REFUND PATH ---", flush=True)
+    print(f"[{client}] Deploying refund campaign...", flush=True)
 
     try:
         from web3 import Web3
@@ -369,7 +369,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
         event_name = config.EVM_CAMPAIGN_CREATED_EVENT[variant]
         logs = factory.events[event_name]().process_receipt(rcpt)
         refund_campaign_addr = logs[0]["args"]["campaign"]
-        print(f"[{client}] Refund campaign: {refund_campaign_addr}")
+        print(f"[{client}] Refund campaign: {refund_campaign_addr}", flush=True)
 
         # Update CAMPAIGN_ADDRESS for refund ops
         base_env[f"CAMPAIGN_ADDRESS_{variant}"] = refund_campaign_addr
@@ -417,7 +417,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
 
         # ── refund × 5 (TIMED via client) ─────────────────────────────────────
         for i in range(1, n_refund + 1):
-            print(f"[{client}] refund() for contributor #{i}...")
+            print(f"[{client}] refund() for contributor #{i}...", flush=True)
             contrib_key = _derive_evm_contributor_key(i)
             env = {**base_env, "PRIVATE_KEY": contrib_key}
             refund_extra_args = ["--tier-id", "0"] if variant == "V3" else []
@@ -433,7 +433,7 @@ def run_evm_lifecycle(client: str, variant: str, env_name: str, deploy_json: dic
             })
 
     except Exception as exc:
-        print(f"[warn] Refund path failed: {exc}", file=sys.stderr)
+        print(f"[warn] Refund path failed: {exc}", file=sys.stderr, flush=True)
 
     # ── Throughput from success path contribute ops ───────────────────────────
     contrib_latencies = [
@@ -532,25 +532,34 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         token_prog = TOKEN_2022_PROGRAM_ID if variant == "V5" else TOKEN_PROGRAM_ID
 
         py_idl_path, program_id_str = config.SOLANA_VARIANT_ARTIFACTS[variant]
+        print(f"[solana_setup] IDL path: {py_idl_path}", flush=True)
 
         with open(config.SOLANA_WALLET_PATH) as fh:
             payer = Keypair.from_bytes(bytes(json.load(fh)))
+        print(f"[solana_setup] Wallet loaded: {payer.pubkey()}", flush=True)
+
         client_rpc = AsyncClient(config.SOLANA_RPC_URL, commitment=Confirmed)
+        print(f"[solana_setup] RPC client created: {config.SOLANA_RPC_URL}", flush=True)
 
         with open(py_idl_path) as fh:
             idl = Idl.from_json(fh.read())
+        print("[solana_setup] IDL loaded", flush=True)
+
         program_id = Pubkey.from_string(program_id_str)
         wallet = Wallet(payer)
         from anchorpy import Provider as AnchorProvider
         provider = AnchorProvider(client_rpc, wallet)
+        print("[solana_setup] Provider created", flush=True)
+
         program = Program(idl, program_id, provider)
+        print("[solana_setup] Program initialized", flush=True)
 
         def _pda(seeds: list[bytes]) -> Pubkey:
             p, _ = Pubkey.find_program_address(seeds, program_id)
             return p
 
         # ── Setup: airdrop, create mint, fund contributors ─────────────────
-        print("[solana_setup] Airdrop + create mint + fund contributors...")
+        print("[solana_setup] Airdrop + create mint + fund contributors...", flush=True)
         await client_rpc.request_airdrop(payer.pubkey(), 100_000_000_000)
         await asyncio.sleep(2)
 
@@ -569,7 +578,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         await asyncio.sleep(2)
 
         # Create ATAs and mint tokens
-        print("[solana_setup] Pre-creating payment ATAs...")
+        print("[solana_setup] Pre-creating payment ATAs...", flush=True)
         payment_atas: list[Pubkey] = []
         skip_opts = TxOpts(skip_confirmation=False, skip_preflight=True)
         for i, c in enumerate(contributors):
@@ -604,7 +613,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         )
         await client_rpc.confirm_transaction(sig, commitment=Confirmed)
         campaign_addr = str(campaign_pda)
-        print(f"[solana_setup] Campaign: {campaign_addr}")
+        print(f"[solana_setup] Campaign: {campaign_addr}", flush=True)
 
         # Pre-create receipt ATAs
         receipt_spl = SPLAsyncToken(client_rpc, receipt_mint_pda, token_prog, payer)
@@ -640,8 +649,8 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         operations: list[dict] = []
 
         # ── SUCCESS PATH: contribute × N ──────────────────────────────────────
-        print(f"[{client}] --- SUCCESS PATH ---")
-        print(f"[{client}] Running {config.N_CONTRIBUTIONS} timed contribute() calls...")
+        print(f"[{client}] --- SUCCESS PATH ---", flush=True)
+        print(f"[{client}] Running {config.N_CONTRIBUTIONS} timed contribute() calls...", flush=True)
         amount_str = str(config.CONTRIB_AMOUNT // (10 ** config.DECIMALS))
 
         for i, c in enumerate(contributors):
@@ -657,17 +666,17 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
                 "tx_hash": output.get("txHash"),
             })
             if (i + 1) % 10 == 0:
-                print(f"  {i + 1} / {config.N_CONTRIBUTIONS}")
+                print(f"  {i + 1} / {config.N_CONTRIBUTIONS}", flush=True)
 
         # ── Setup fast-deadline campaign for finalize/withdraw ────────────────
-        print(f"[{client}] Setting up fast-deadline campaign for finalize/withdraw...")
+        print(f"[{client}] Setting up fast-deadline campaign for finalize/withdraw...", flush=True)
         import time as _time2
         fc_id = (int(_time2.time() * 1000) & 0xFFFFFFFF) + 1
         fc_id_bytes = fc_id.to_bytes(8, "little")
         fc_pda = _pda([b"campaign", bytes(creator_kp.pubkey()), fc_id_bytes])
         fc_vault = _pda([b"vault", bytes(fc_pda)])
         fc_receipt = _pda([b"receipt_mint", bytes(fc_pda)])
-        fc_deadline = int(_time2.time()) + 5
+        fc_deadline = int(_time2.time()) + config.FAST_DEADLINE_BASE_SECS + 1 * config.FAST_DEADLINE_PER_CONTRIB_SECS
 
         sig = await program.rpc["initialize_campaign"](
             fc_id, config.SOFT_CAP, config.HARD_CAP, fc_deadline,
@@ -685,10 +694,10 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         await client_rpc.confirm_transaction(sig, commitment=Confirmed)
 
         # One contribution to meet softCap
+        from spl.token.instructions import get_associated_token_address
         fc_c = contributors[0]
         await payment_mint.mint_to(payment_atas[0], payer, config.CONTRIB_AMOUNT, opts=skip_opts)
-        fc_receipt_spl = SPLAsyncToken(client_rpc, fc_receipt, token_prog, payer)
-        fc_receipt_ata = await fc_receipt_spl.create_account(fc_c.pubkey())
+        fc_receipt_ata = get_associated_token_address(fc_c.pubkey(), fc_receipt, token_prog)
         fc_contrib_record = _pda([b"contributor", bytes(fc_pda), bytes(fc_c.pubkey())])
         sig = await program.rpc["contribute"](
             config.CONTRIB_AMOUNT,
@@ -710,10 +719,12 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
             ),
         )
         await client_rpc.confirm_transaction(sig, commitment=Confirmed)
-        await asyncio.sleep(6)  # wait for deadline
+        wait_secs = max(0, fc_deadline - int(_time2.time()) + config.FAST_DEADLINE_BUFFER_SECS)
+        print(f"[{client}] Waiting {wait_secs}s for fc deadline...", flush=True)
+        await asyncio.sleep(wait_secs)
 
         # ── finalize ──────────────────────────────────────────────────────────
-        print(f"[{client}] finalize()...")
+        print(f"[{client}] finalize()...", flush=True)
         fc_env = {
             **base_env,
             "SOLANA_CAMPAIGN_ADDRESS": str(fc_pda),
@@ -733,7 +744,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         # ── withdraw × 3 ──────────────────────────────────────────────────────
         creator_env = {**fc_env, "SOLANA_KEYPAIR_PATH": creator_tmp.name}
         for m in range(len(config.MILESTONES)):
-            print(f"[{client}] withdraw() #{m}...")
+            print(f"[{client}] withdraw() #{m}...", flush=True)
             output, proc_ms = _client_run_sync("withdraw", [], creator_env)
             operations.append({
                 "name": f"withdraw_milestone_{m}",
@@ -747,14 +758,20 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
 
         # ── REFUND PATH ───────────────────────────────────────────────────────
         # (simplified: reuse Python harness for refund campaign setup, then client for refund)
-        print(f"\n[{client}] --- REFUND PATH (Python setup + client refund) ---")
+        print(f"\n[{client}] --- REFUND PATH (Python setup + client refund) ---", flush=True)
         n_refund = 5
+
+        # Pre-mint tokens for all refund contributors before starting the deadline
+        # clock so that mint_to confirms don't eat into the campaign deadline window.
+        for i_r in range(n_refund):
+            await payment_mint.mint_to(payment_atas[i_r], payer, config.CONTRIB_AMOUNT, opts=skip_opts)
+
         ref_id = (int(_time2.time() * 1000) & 0xFFFFFFFF) + 2
         ref_id_bytes = ref_id.to_bytes(8, "little")
         ref_pda = _pda([b"campaign", bytes(creator_kp.pubkey()), ref_id_bytes])
         ref_vault = _pda([b"vault", bytes(ref_pda)])
         ref_receipt = _pda([b"receipt_mint", bytes(ref_pda)])
-        ref_deadline = int(_time2.time()) + 5
+        ref_deadline = int(_time2.time()) + config.FAST_DEADLINE_BASE_SECS + n_refund * config.FAST_DEADLINE_PER_CONTRIB_SECS
 
         sig = await program.rpc["initialize_campaign"](
             ref_id, config.SOFT_CAP_REFUND, config.HARD_CAP, ref_deadline,
@@ -771,11 +788,8 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         )
         await client_rpc.confirm_transaction(sig, commitment=Confirmed)
 
-        ref_receipt_spl = SPLAsyncToken(client_rpc, ref_receipt, token_prog, payer)
-        from spl.token.instructions import get_associated_token_address
         for i_r, c in enumerate(contributors[:n_refund]):
-            await payment_mint.mint_to(payment_atas[i_r], payer, config.CONTRIB_AMOUNT, opts=skip_opts)
-            ref_ra = await ref_receipt_spl.create_account(c.pubkey())
+            ref_ra = get_associated_token_address(c.pubkey(), ref_receipt, token_prog)
             ref_cr = _pda([b"contributor", bytes(ref_pda), bytes(c.pubkey())])
             sig = await program.rpc["contribute"](
                 config.CONTRIB_AMOUNT,
@@ -798,7 +812,9 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
             )
             await client_rpc.confirm_transaction(sig, commitment=Confirmed)
 
-        await asyncio.sleep(6)
+        wait_secs = max(0, ref_deadline - int(_time2.time()) + config.FAST_DEADLINE_BUFFER_SECS)
+        print(f"[{client}] Waiting {wait_secs}s for ref deadline...", flush=True)
+        await asyncio.sleep(wait_secs)
         sig = await program.rpc["finalize"](
             ctx=Context(accounts={"caller": payer.pubkey(), "campaign": ref_pda})
         )
@@ -810,7 +826,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
             "SOLANA_CAMPAIGN_ADDRESS": str(ref_pda),
         }
         for i_r in range(n_refund):
-            print(f"[{client}] refund() for contributor #{i_r + 1}...")
+            print(f"[{client}] refund() for contributor #{i_r + 1}...", flush=True)
             env = {**ref_env_base, "SOLANA_KEYPAIR_PATH": contrib_keypair_files[i_r]}
             output, proc_ms = _client_run_sync("refund", [], env)
             operations.append({
@@ -894,7 +910,7 @@ def main() -> None:
                 deploy_json = json.load(fh)
         else:
             print(f"[info] --deploy-json not provided; auto-deploying variant={variant} env={env_name}...",
-                  file=sys.stderr)
+                  file=sys.stderr, flush=True)
             from clients.python.evm.deploy import deploy as _evm_deploy
             deploy_json = _evm_deploy(variant, env_name)
         result = run_evm_lifecycle(args.client, variant, env_name, deploy_json)
@@ -905,7 +921,7 @@ def main() -> None:
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as fh:
         json.dump(result, fh, indent=2)
-    print(f"[output] {out_path}")
+    print(f"[output] {out_path}", flush=True)
 
 
 if __name__ == "__main__":

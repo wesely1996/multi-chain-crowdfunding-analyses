@@ -227,14 +227,12 @@ export default function RunPanel({ onRunComplete }: Props) {
             )}
           </div>
 
-          {output && (
-            <pre
-              ref={logRef}
-              className="h-64 overflow-auto rounded border border-gray-800 bg-gray-950 p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap"
-            >
-              {output}
-            </pre>
-          )}
+          <pre
+            ref={logRef}
+            className="h-64 overflow-auto rounded border border-gray-800 bg-gray-950 p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap"
+          >
+            {output || <span className="text-gray-600">Waiting for output…</span>}
+          </pre>
         </div>
       )}
 

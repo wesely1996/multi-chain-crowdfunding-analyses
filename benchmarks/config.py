@@ -172,6 +172,17 @@ SOFT_CAP:       int = 100 * (10 ** DECIMALS)     # 100 USDC — reachable at N=1
 HARD_CAP:       int = 500 * (10 ** DECIMALS)     # 500 USDC — reachable at N=50
 DEADLINE_DAYS:  int = 30                          # Advance via evm_increaseTime on EVM
 
+# Solana fast-deadline campaigns (finalize/withdraw/refund lifecycle setup).
+# These campaigns must expire quickly so the benchmark doesn't stall.
+# Deadline = FAST_DEADLINE_BASE_SECS + n_contributes * FAST_DEADLINE_PER_CONTRIB_SECS,
+# so campaigns with more contributors get proportionally more runway.
+FAST_DEADLINE_BASE_SECS: int = int(os.getenv("FAST_DEADLINE_BASE_SECS", "15"))
+# Per-contribution allowance: covers mint_to + contribute RPC + confirmation round-trip.
+FAST_DEADLINE_PER_CONTRIB_SECS: int = int(os.getenv("FAST_DEADLINE_PER_CONTRIB_SECS", "6"))
+# Extra buffer added after the deadline before calling finalize, to avoid
+# clock skew between the client and the validator.
+FAST_DEADLINE_BUFFER_SECS: int = int(os.getenv("FAST_DEADLINE_BUFFER_SECS", "2"))
+
 # Milestone schedule — must sum to 100
 MILESTONES: list[int] = [30, 30, 40]
 

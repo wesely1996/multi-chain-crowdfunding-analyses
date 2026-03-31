@@ -85,6 +85,14 @@ export function RunForm() {
         } = await res.json();
         setOutput(data.output ?? "");
         setResultFile(data.resultFile);
+        if (data.status === "success" || data.status === "error") {
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          osc.connect(ctx.destination);
+          osc.frequency.value = 880;
+          osc.start();
+          osc.stop(ctx.currentTime + 0.15);
+        }
         setStatus(data.status);
       } catch {
         // ignore transient fetch errors; keep polling

@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
         VARIANT: variant,
         CLIENT: clientLabel,
         BENCHMARK_ENV: env,
+        PYTHONUNBUFFERED: "1",
       },
     }
   );
