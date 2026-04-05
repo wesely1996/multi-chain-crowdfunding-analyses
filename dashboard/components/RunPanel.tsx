@@ -66,7 +66,7 @@ export default function RunPanel({ onRunComplete }: Props) {
 
   // Poll run status until terminal state
   const pollRun = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<void> => {
       const res = await fetch(`/api/run/${id}`);
       if (!res.ok) return;
       const data = await res.json();
@@ -75,6 +75,17 @@ export default function RunPanel({ onRunComplete }: Props) {
       if (data.status === "success" || data.status === "error") {
         fetchHistory();
         if (data.status === "success") onRunComplete();
+        try {
+          const ctx = new AudioContext();
+          await ctx.resume();
+          const osc = ctx.createOscillator();
+          osc.connect(ctx.destination);
+          osc.frequency.value = 880;
+          osc.start();
+          osc.stop(ctx.currentTime + 0.15);
+        } catch {
+          // audio not available
+        }
       }
     },
     [onRunComplete, fetchHistory],

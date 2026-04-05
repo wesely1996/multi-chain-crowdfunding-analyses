@@ -87,6 +87,7 @@ export function RunForm() {
         setResultFile(data.resultFile);
         if (data.status === "success" || data.status === "error") {
           const ctx = new AudioContext();
+          await ctx.resume();
           const osc = ctx.createOscillator();
           osc.connect(ctx.destination);
           osc.frequency.value = 880;

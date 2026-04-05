@@ -152,6 +152,22 @@ V2 ponovo demonstrira prednost samodovoljnog vault modela — ušteda od 7,2% pr
 
 Propusnost opada sa porastom gas troškova po transakciji. Međutim, ove vrednosti su artefakt Hardhat automine režima (svaki blok sadrži tačno jednu transakciju sa trenutnom potvrdom) i ne reflektuju ponašanje na produkcijskim mrežama.
 
+#### 3.1.6 Uticaj klijentske biblioteke na propusnost
+
+Vrednosti propusnosti prikazane u sekciji 3.1.5 prikupljene su isključivo putem Python benchmark okruženja. Međutim, ista operacija `contribute` (V1 ERC-20, N=50, Hardhat localnet) testirana je i putem TypeScript (viem) i .NET (Nethereum) klijenata, pri čemu su uočene značajne razlike u izmerenom TPS-u:
+
+| Klijent | Prosečna latencija po operaciji | TPS | Uzrok razlike |
+|---|---|---|---|
+| Python (web3.py) | ~12 ms | ~98 | Sinhroni HTTP — `wait_for_transaction_receipt` vraća rezultat na prvom upitu (~3–6 ms po pozivu) |
+| TypeScript (viem) | ~76 ms | ~13 | Async/await sa overhead-om JavaScript event loop-a (~38 ms po čekanju potvrde) |
+| .NET (Nethereum) | ~241 ms | ~4 | Asinhroni `HttpClient` pozivi u petlji za čekanje potvrde (`WaitForReceipt` u `EvmCampaignService.cs`), ~120 ms po pozivu |
+
+Ključni uvid leži u činjenici da svaka operacija `contribute` na EVM-u zahteva **dve sekvencijalne transakcije** (approve + contribute), čime vreme čekanja potvrde (receipt polling) postaje dominantan faktor ukupne latencije. U Hardhat automine režimu, potvrda je dostupna odmah nakon slanja transakcije — razlika u TPS-u stoga ne proizlazi iz vremena rudarenja bloka, već isključivo iz implementacije mehanizma čekanja potvrde u svakoj klijentskoj biblioteci.
+
+Python-ov sinhroni HTTP model (biblioteka `requests`) izvršava blokirajući poziv koji se na loopback interfejsu razrešava za 3–6 ms. TypeScript-ov `waitForTransactionReceipt` uvodi dodatnu latenciju usled raspoređivanja mikrozadataka (microtask scheduling) u JavaScript event loop-u. .NET implementacija u `EvmCampaignService.cs` koristi asinhronu petlju čekanja (`WaitForReceipt`) sa `HttpClient` pozivima — iako se `Task.Delay(100)` backoff nikada ne aktivira jer automine vraća potvrdu na prvom upitu, sam overhead asinhronog HTTP klijenta na localhost-u je značajno viši od Python-ovog sinhronog modela.
+
+**Ove razlike u TPS-u predstavljaju artefakt klijentske implementacije, a ne karakteristiku EVM platforme ili pametnog ugovora.** Na realnim testnim mrežama poput Sepolia, gde latencija mrežnog potvrđivanja iznosi 1–3 sekunde po bloku, overhead klijentskog čekanja potvrde (3–120 ms) postaje zanemarljiv u poređenju sa mrežnom latencijom. U tom scenariju, sva tri klijenta bi demonstrirala praktično identičnu propusnost, jer bi vreme potvrde bloka u potpunosti dominiralo ukupnom latencijom operacije.
+
 ### 3.2 Solana varijante (V4, V5)
 
 #### 3.2.1 Troškovi transakcija

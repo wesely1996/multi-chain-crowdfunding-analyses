@@ -60,6 +60,8 @@ if _repo_root not in sys.path:
 
 from clients.python.shared.output import ms as _ms  # noqa: E402
 
+sys.stdout.reconfigure(line_buffering=True)
+
 SCHEMA_VERSION = "2"
 
 
@@ -172,7 +174,7 @@ def throughput_evm(variant: str = config.VARIANT, client: str = config.CLIENT) -
         per_tx_gas.append(rcpt["gasUsed"])
         per_tx_latency.append(latency)
         if (i + 1) % 10 == 0:
-            print(f"  {i + 1} / {config.N_CONTRIBUTIONS}")
+            print(f"  {i + 1} / {config.N_CONTRIBUTIONS}", flush=True)
     t_end = _ms()
 
     total_ms = t_end - t_start
@@ -374,7 +376,7 @@ def throughput_solana(variant: str = config.VARIANT, client: str = config.CLIENT
             per_tx_fee.append(fee)
             per_tx_latency.append(latency)
             if (i + 1) % 10 == 0:
-                print(f"  {i + 1} / {config.N_CONTRIBUTIONS}")
+                print(f"  {i + 1} / {config.N_CONTRIBUTIONS}", flush=True)
         t_end = _ms()
 
         await client.close()
@@ -470,6 +472,12 @@ def main() -> None:
         throughput_evm(variant=args.variant, client=args.client)
     if platform in ("solana", "both"):
         throughput_solana(variant=args.variant, client=args.client)
+
+    try:
+        import winsound
+        winsound.MessageBeep(winsound.MB_ICONINFORMATION)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

@@ -22,8 +22,22 @@ export interface ThroughputRecord {
         avg: number;
         min: number;
         max: number;
-        stdev: number;
+        stdev?: number;
     };
+    per_tx_fee_lamports?: {
+        avg: number;
+        min: number;
+        max: number;
+        stdev?: number;
+    };
+}
+
+export interface PriceSnapshot {
+    eth_usd: number;
+    sol_usd: number;
+    usd_rsd: number;
+    gas_price_gwei: number;
+    fetched_at_utc: number;
 }
 
 export interface BenchmarkFile {
@@ -43,6 +57,7 @@ export interface BenchmarkFile {
     limitations: string[];
     operations: OperationRecord[];
     throughput: ThroughputRecord;
+    prices?: PriceSnapshot;
     /** Populated at load time from the filename; not present in the JSON file itself. */
     kind?: string;
 }

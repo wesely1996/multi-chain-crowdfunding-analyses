@@ -3,9 +3,10 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
-import { existsSync } from "fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
 import { createRun, appendOutput, completeRun, failRun } from "@/lib/run-store";
+import type { PriceSnapshot } from "@/lib/types";
 
 const REPO_ROOT = path.resolve(process.cwd(), "..");
 
@@ -19,6 +20,57 @@ function resolvePython(): string {
 }
 
 const PYTHON = resolvePython();
+
+const RESULTS_DIR = path.join(REPO_ROOT, "benchmarks", "results");
+
+async function fetchPriceSnapshot(): Promise<PriceSnapshot | null> {
+  try {
+    const [coinRes, fxRes] = await Promise.all([
+      fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum,solana&vs_currencies=usd"),
+      fetch("https://open.er-api.com/v6/latest/USD"),
+    ]);
+    if (!coinRes.ok || !fxRes.ok) return null;
+    const coin = await coinRes.json() as { ethereum: { usd: number }; solana: { usd: number } };
+    const fx   = await fxRes.json()  as { rates: Record<string, number> };
+    return {
+      eth_usd:        coin.ethereum.usd,
+      sol_usd:        coin.solana.usd,
+      usd_rsd:        fx.rates.RSD,
+      gas_price_gwei: 1,
+      fetched_at_utc: Math.floor(Date.now() / 1000),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function embedPricesInResult(variant: string, clientLabel: string, env: string, kind: string): Promise<void> {
+  const prices = await fetchPriceSnapshot();
+  if (!prices) return;
+
+  const prefix = `${variant}_${clientLabel}_${env}_${kind}_`;
+  let files: { path: string; mtime: number }[];
+  try {
+    files = readdirSync(RESULTS_DIR)
+      .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
+      .map((f) => {
+        const p = path.join(RESULTS_DIR, f);
+        return { path: p, mtime: statSync(p).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch {
+    return;
+  }
+  if (files.length === 0) return;
+
+  try {
+    const data = JSON.parse(readFileSync(files[0].path, "utf-8"));
+    data.prices = prices;
+    writeFileSync(files[0].path, JSON.stringify(data, null, 2));
+  } catch {
+    // non-fatal — result file still usable without prices
+  }
+}
 
 type Platform = "evm" | "solana";
 type Variant = "V1" | "V2" | "V3" | "V4" | "V5";
@@ -129,7 +181,7 @@ export async function POST(req: NextRequest) {
     if (code === 0) {
       // Result files include a runtime timestamp in the name; the dashboard
       // discovers them by scanning the results directory rather than by path.
-      completeRun(id);
+      embedPricesInResult(variant, clientLabel, env, kind).finally(() => completeRun(id));
     } else {
       failRun(id);
     }

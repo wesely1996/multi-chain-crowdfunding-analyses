@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BenchmarkFile } from "@/lib/types";
-import { formatGas, formatMs, formatTps } from "@/lib/format";
+import { formatGas, formatMs, formatTps, costPerTpsToRsd } from "@/lib/format";
 import { MetricCard } from "@/components/MetricCard";
 import FilterBar from "@/components/FilterBar";
 import OperationsTable from "@/components/OperationsTable";
@@ -11,14 +11,30 @@ import RunPanel from "@/components/RunPanel";
 
 // Cost-to-performance ratio: average fee units per TPS.
 // The core thesis metric — how much does each unit of throughput cost on each chain?
-function deriveCostPerTps(result: BenchmarkFile): string {
+function deriveCostPerTps(result: BenchmarkFile): { raw: string; rsd: string } {
+  // Throughput runs store avg cost directly; lifecycle runs don't — derive from operations.
   const gasAvg = result.throughput.per_tx_gas?.avg ?? null;
-  const feeAvg = result.throughput.per_tx_fee?.avg ?? null;
-  const costUnit = gasAvg ?? feeAvg;
-  if (costUnit === null || result.throughput.tps === 0) return "—";
-  return (costUnit / result.throughput.tps).toLocaleString("en-US", {
-    maximumFractionDigits: 0,
-  });
+  const feeAvg = (result.throughput.per_tx_fee ?? result.throughput.per_tx_fee_lamports)?.avg ?? null;
+  let costUnit = gasAvg ?? feeAvg;
+
+  if (costUnit === null) {
+    const contributes = result.operations.filter((op) => op.name === "contribute");
+    if (contributes.length > 0) {
+      const costs = contributes.map((op) =>
+        result.platform === "EVM"
+          ? (op.gas_used ?? parseInt(op.cost, 10))
+          : parseInt(op.cost, 10)
+      ).filter((v) => !isNaN(v));
+      if (costs.length > 0) costUnit = costs.reduce((a, b) => a + b, 0) / costs.length;
+    }
+  }
+
+  if (costUnit === null || result.throughput.tps === 0) return { raw: "—", rsd: "—" };
+  const costPerTps = costUnit / result.throughput.tps;
+  return {
+    raw: costPerTps.toLocaleString("en-US", { maximumFractionDigits: 0 }),
+    rsd: costPerTpsToRsd(costPerTps, result.platform, result.prices),
+  };
 }
 
 function formatTimestamp(utcSeconds: number): string {
@@ -50,6 +66,7 @@ interface ResultCardProps {
 }
 
 function ResultCard({ result, isSelected, onClick }: ResultCardProps) {
+  const costTps = deriveCostPerTps(result);
   const platformBadge =
     result.platform === "EVM"
       ? "bg-blue-900/40 text-blue-400"
@@ -94,9 +111,11 @@ function ResultCard({ result, isSelected, onClick }: ResultCardProps) {
         </div>
         <div className="flex justify-between col-span-2">
           <span className="text-gray-500">Cost/TPS</span>
-          <span className="font-mono text-yellow-400">
-            {deriveCostPerTps(result)}
-          </span>
+          <span className="font-mono text-yellow-400">{costTps.raw}</span>
+        </div>
+        <div className="flex justify-between col-span-2">
+          <span className="text-gray-500">≈ RSD</span>
+          <span className="font-mono text-yellow-300/70">{costTps.rsd}</span>
         </div>
       </div>
     </button>
@@ -108,13 +127,14 @@ interface ResultDetailProps {
 }
 
 function ResultDetail({ result }: ResultDetailProps) {
+  const costTps = deriveCostPerTps(result);
   const isEvm = result.platform === "EVM";
 
   const avgFeeLabel = isEvm ? "Avg Gas/Tx" : "Avg Fee/Tx";
   const avgFeeValue = isEvm
     ? formatGas(result.throughput.per_tx_gas?.avg ?? null)
-    : result.throughput.per_tx_fee
-      ? result.throughput.per_tx_fee.avg.toLocaleString("en-US") + " lam"
+    : (result.throughput.per_tx_fee ?? result.throughput.per_tx_fee_lamports)
+      ? ((result.throughput.per_tx_fee ?? result.throughput.per_tx_fee_lamports)!.avg.toLocaleString("en-US") + " lam")
       : "—";
 
   return (
@@ -162,10 +182,20 @@ function ResultDetail({ result }: ResultDetailProps) {
           <p className="text-xs text-yellow-300/60 mt-0.5">
             Avg fee units ÷ TPS — lower = more efficient per unit of throughput
           </p>
+          {result.prices && (
+            <p className="text-xs text-yellow-300/40 mt-0.5">
+              Prices at run time — ETH ${result.prices.eth_usd.toLocaleString()} · SOL ${result.prices.sol_usd} · 1 USD = {result.prices.usd_rsd} RSD
+            </p>
+          )}
         </div>
-        <span className="ml-auto font-mono text-xl font-bold text-yellow-400">
-          {deriveCostPerTps(result)}
-        </span>
+        <div className="ml-auto text-right">
+          <span className="font-mono text-xl font-bold text-yellow-400">
+            {costTps.raw}
+          </span>
+          <p className="font-mono text-sm text-yellow-300/70 mt-0.5">
+            ≈ {costTps.rsd}
+          </p>
+        </div>
       </div>
 
       {/* Limitations */}
