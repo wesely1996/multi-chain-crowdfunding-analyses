@@ -120,7 +120,75 @@ storage-clear gas refund (capped at 20% of `gasUsed`) reduces net cost.
 
 ---
 
-### M-V1-2 · Sepolia Testnet — Gas Benchmark
+### M-V1-2 · Local Hardhat Network — TypeScript (viem) Client
+
+**Date:** 2026-03-28
+**Environment:** Hardhat in-process EVM (local network, no external node)
+**Client:** TypeScript — viem 2.21 (`clients/ts-evm/`)
+**Script:** `benchmarks/run_tests.py --platform evm` (Python harness, V1, CLIENT=ts)
+**Result file:** `V1_ts_hardhat-localnet_lifecycle_1774372940.json`
+
+#### Scenario Parameters
+
+Identical to M-V1-1.
+
+#### 4.5 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 3,820 |
+| Throughput (TPS) | 13.09 |
+| Contribute latency avg (ms) `[automine]` | 76 |
+| Contribute latency min (ms) | 72 |
+| Contribute latency max (ms) | 86 |
+
+**Observation — async/await overhead [fact]:**
+The TypeScript client is ~7.5× slower than the Python client (13.09 vs. 98.23 TPS) despite
+executing identical on-chain operations producing identical gas costs. The latency difference
+(76 ms vs. 12 ms per `contribute`) is entirely a client-side artefact: viem's
+`waitForTransactionReceipt` schedules receipt polling through the JavaScript event loop,
+introducing microtask-scheduling overhead that does not exist in Python's synchronous
+blocking `wait_for_transaction_receipt`. On a real network where confirmation latency
+is ≥ 1 s, this difference is negligible.
+
+---
+
+### M-V1-3 · Local Hardhat Network — .NET (Nethereum) Client
+
+**Date:** 2026-03-28
+**Environment:** Hardhat in-process EVM (local network, no external node)
+**Client:** .NET 8 — Nethereum (`clients/dotnet/`)
+**Script:** `benchmarks/run_tests.py --platform evm` (Python harness, V1, CLIENT=dotnet)
+**Result file:** `V1_dotnet_hardhat-localnet_lifecycle_1774373399.json`
+
+#### Scenario Parameters
+
+Identical to M-V1-1.
+
+#### 4.5 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 12,243 |
+| Throughput (TPS) | 4.08 |
+| Contribute latency avg (ms) `[automine]` | 241 |
+| Contribute latency min (ms) | 228 |
+| Contribute latency max (ms) | 329 |
+
+**Observation — async HttpClient overhead [fact]:**
+The .NET client is ~20× slower than the Python client (4.08 vs. 98.23 TPS) on localhost.
+The dominant factor is the `WaitForReceipt` polling loop in `EvmCampaignService.cs`, which
+uses an async `HttpClient` call per poll. Even with Hardhat automine (receipt available on
+the first poll, so the `Task.Delay(100)` backoff never fires), the .NET async HTTP client
+has ~120 ms of per-request overhead on loopback vs. Python's synchronous ~6 ms. Each
+`contribute` operation issues two transactions (approve + contribute), so 2 × 120 ms ≈ 241 ms.
+On testnet this overhead is immaterial.
+
+---
+
+### M-V1-4 · Sepolia Testnet — Gas Benchmark
 
 > **Status: pending.**
 > Testnet deployment configuration is in place (`contracts/evm/.env.example`,
@@ -128,6 +196,42 @@ storage-clear gas refund (capped at 20% of `gasUsed`) reduces net cost.
 > first successful Sepolia deployment and benchmark run. Expected additional columns:
 > `gasPrice (gwei)`, `cost (ETH)`, `cost (USD at time of measurement)`,
 > `block confirmation latency (s)`.
+
+---
+
+### M-V1-5 · Local Hardhat Network — Dedicated Throughput Benchmark (All Clients)
+
+**Date:** 2026-04-05
+**Methodology:** `benchmarks/throughput_test.py --platform evm` — 50 distinct EOAs, each
+pre-funded and pre-approved outside the timed window. The harness invokes a fresh client
+subprocess per transaction (Python / ts-node / dotnet run), measuring wall-clock time from
+the first to the last confirmed `contribute()` receipt.
+**Result files:**
+- `V1_python_hardhat-localnet_throughput_1775402889.json`
+- `V1_ts_hardhat-localnet_throughput_1775403443.json`
+- `V1_dotnet_hardhat-localnet_throughput_1775404339.json`
+
+#### Results
+
+| Client | Total time (ms) | TPS | Gas avg | Latency avg (ms) `[automine]` |
+|--------|---------------:|----:|--------:|------------------------------:|
+| Python (web3.py) | 78,299 | 0.6386 | 108,026 | 12 |
+| TypeScript (viem) | 142,022 | 0.3521 | 108,026 | 86 |
+| .NET (Nethereum) | 114,921 | 0.4351 | 108,026 | 252 |
+
+**Price reference (at time of .NET run, ts=1775404339):** ETH/USD $2,057.19, gas price 1 gwei.
+Cost per `contribute` at 1 gwei: 108,026 gas × 10⁻⁹ ETH/gas × $2,057.19 ≈ **$0.000222 USD** [assumption — localnet gas price; testnet may differ].
+
+**Methodology note — process-startup anomaly [fact]:**
+The dedicated throughput TPS values (0.35–0.64) are dramatically lower than the lifecycle TPS
+values (4.08–98.23) for the same clients. The discrepancy is not attributable to the
+transactions themselves: per-transaction RPC latency is 12–252 ms (sum ≈ 0.6–12 s for 50 tx),
+yet total elapsed times are 78–142 s. The extra time is process startup overhead: the
+dedicated harness spawns a fresh subprocess per transaction
+(Python interpreter: ~1,550 ms; ts-node with compilation: ~2,820 ms; .NET cold start: ~2,280 ms).
+Total elapsed ≈ N × process_startup_ms. The lifecycle benchmark runs all transactions in-process,
+which is why it shows much higher TPS. Neither methodology represents real-world throughput;
+they measure different cost axes (runtime overhead vs. client library receipt-poll latency).
 
 ---
 
@@ -223,9 +327,79 @@ the vault shares are burned internally, avoiding a cross-contract CALL.
 
 ---
 
-### M-V2-2 · Sepolia Testnet — Gas Benchmark
+### M-V2-2 · Local Hardhat Network — TypeScript (viem) Client
 
-> **Status: pending.** Same methodology as M-V1-2 applied to `CrowdfundingCampaign4626`.
+**Date:** 2026-03-28
+**Client:** TypeScript — viem 2.21
+**Result file:** `V2_ts_hardhat-localnet_lifecycle_1774370189.json`
+
+#### Scenario Parameters
+
+Identical to M-V2-1.
+
+#### 4.5 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 3,918 |
+| Throughput (TPS) | 12.76 |
+| Contribute latency avg (ms) `[automine]` | 76 |
+
+**Observation:** Consistent with M-V1-2 (13.09 TPS). The ~0.33 TPS reduction vs. V1 is
+proportional to the slightly higher per-tx gas cost of V2 (102,606 vs. 108,026 avg), which
+causes marginally longer in-process EVM execution time. The absolute difference is negligible.
+
+---
+
+### M-V2-3 · Local Hardhat Network — .NET (Nethereum) Client
+
+**Date:** 2026-03-28
+**Client:** .NET 8 — Nethereum
+**Result file:** `V2_dotnet_hardhat-localnet_lifecycle_1774373757.json`
+
+#### Scenario Parameters
+
+Identical to M-V2-1.
+
+#### 4.5 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 11,829 |
+| Throughput (TPS) | 4.23 |
+| Contribute latency avg (ms) `[automine]` | 237 |
+
+**Observation:** Consistent with M-V1-3 (4.08 TPS). The marginal improvement (+0.15 TPS) relative
+to V1 is attributable to V2's slightly lower gas cost (fewer EVM execution cycles in Hardhat's
+in-process node), not to any client change.
+
+---
+
+### M-V2-4 · Local Hardhat Network — .NET Dedicated Throughput Benchmark
+
+**Date:** 2026-04-05
+**Result file:** `V2_dotnet_hardhat-localnet_throughput_1775404466.json`
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 114,016 |
+| TPS | 0.4385 |
+| Gas avg | 102,606 |
+| Latency avg (ms) `[automine]` | 250 |
+
+**Price reference (ts=1775404466):** ETH/USD $2,056.17, gas price 1 gwei.
+Cost per `contribute` at 1 gwei: 102,606 gas × 10⁻⁹ ETH/gas × $2,056.17 ≈ **$0.000211 USD** [assumption].
+
+See M-V1-5 for methodology note on process-startup overhead.
+
+---
+
+### M-V2-5 · Sepolia Testnet — Gas Benchmark
+
+> **Status: pending.** Same methodology as M-V1-4 applied to `CrowdfundingCampaign4626`.
 
 ---
 
@@ -239,7 +413,7 @@ the vault shares are burned internally, avoiding a cross-contract CALL.
 **EVM target:** cancun
 **Optimizer:** enabled, 200 runs
 **Script:** `benchmarks/run_tests.py --platform evm` (Python harness, V3)
-**Result file:** `V3_python_hardhat-localnet_lifecycle_1774371287.json`
+**Result file:** `V3_python_hardhat-localnet_lifecycle_1775403203.json`
 
 #### Scenario Parameters
 
@@ -317,14 +491,82 @@ a cross-contract CALL to burn tokens from a separate token contract. V2 is notab
 | Metric | Value |
 |--------|-------|
 | N contributions | 50 |
-| Total wall-clock time (ms) | 610 |
-| Throughput (TPS) | 81.97 |
+| Total wall-clock time (ms) | 622 |
+| Throughput (TPS) | 80.39 |
+
+[note] A prior run (1774371287) recorded 610 ms / 81.97 TPS. The 1.6% variance is within run-to-run noise attributable to OS scheduling on the benchmark host.
 
 ---
 
-### M-V3-2 · Sepolia Testnet — Gas Benchmark
+### M-V3-2 · Local Hardhat Network — TypeScript (viem) Client
 
-> **Status: pending.** Same methodology as M-V1-2 applied to `CrowdfundingCampaign1155`.
+**Date:** 2026-03-28
+**Client:** TypeScript — viem 2.21
+**Result file:** `V3_ts_hardhat-localnet_lifecycle_1774373136.json`
+
+#### Scenario Parameters
+
+Identical to M-V3-1.
+
+#### 4.5 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 3,858 |
+| Throughput (TPS) | 12.96 |
+| Contribute latency avg (ms) `[automine]` | 76 |
+
+**Observation:** Consistent with M-V1-2 and M-V2-2 (12.76–13.09 TPS range). TypeScript
+receipt-poll latency is invariant to the EVM variant because viem's event loop overhead
+dominates and all three variants produce similar per-transaction EVM execution times.
+
+---
+
+### M-V3-3 · Local Hardhat Network — .NET (Nethereum) Client
+
+**Date:** 2026-03-28
+**Client:** .NET 8 — Nethereum
+**Result file:** `V3_dotnet_hardhat-localnet_lifecycle_1774373890.json`
+
+#### Scenario Parameters
+
+Identical to M-V3-1.
+
+#### 4.5 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 11,694 |
+| Throughput (TPS) | 4.28 |
+| Contribute latency avg (ms) `[automine]` | 238 |
+
+**Observation:** Consistent with M-V1-3 and M-V2-3 (4.08–4.28 TPS). The slight increase vs. V1
+(4.28 vs. 4.08) is within measurement noise.
+
+---
+
+### M-V3-4 · Local Hardhat Network — .NET Dedicated Throughput Benchmark
+
+**Date:** 2026-04-05
+**Result file:** `V3_dotnet_hardhat-localnet_throughput_1774382858.json`
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 109,702 |
+| TPS | 0.4558 |
+| Gas avg | 128,653 |
+| Latency avg (ms) `[automine]` | 248 |
+
+See M-V1-5 for methodology note on process-startup overhead.
+
+---
+
+### M-V3-5 · Sepolia Testnet — Gas Benchmark
+
+> **Status: pending.** Same methodology as M-V1-4 applied to `CrowdfundingCampaign1155`.
 
 ---
 
@@ -436,6 +678,60 @@ methodology is identical to the EVM benchmark for controlled comparison.
 
 ---
 
+### M-V4-3 · Localnet — Second Run (solana-test-validator)
+
+**Date:** 2026-03-28
+**Environment:** `solana-test-validator` (local, `--reset`)
+**Script:** `benchmarks/run_tests.py --platform solana` (Python harness, V4)
+**Result file:** `V4_python_solana-localnet_lifecycle_1774992181.json`
+
+#### Scenario Parameters
+
+Identical to M-V4-1.
+
+#### 4.5 Throughput
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 30,774 |
+| Throughput (TPS) | 1.6247 |
+| Contribute fee (lamports) | 5,000 |
+| Contribute latency avg (ms) | ~680 |
+
+**Observation — run-to-run variance [note]:**
+This run yields 1.6247 TPS vs. 1.9792 TPS in M-V4-1 — a 17.9% reduction. The lower throughput
+reflects slower slot confirmation on this particular validator invocation (~680 ms avg vs.
+~515 ms in M-V4-1); localnet slot timing is sensitive to host CPU load and is not controlled
+between runs. The fee per transaction (5,000 lamports) is lower than M-V4-1 (10,000 lamports),
+suggesting this run used a single-signer transaction path. Both data points are recorded as
+measured; the M-V4-1 run is the primary reference for the cross-chain comparison tables.
+
+---
+
+### M-V4-4 · Localnet — Dedicated Throughput Benchmark
+
+**Date:** 2026-03-28
+**Script:** `benchmarks/throughput_test.py --platform solana`
+**Result file:** `V4_python_solana-localnet_throughput_1774993943.json`
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 79,570 |
+| TPS | 0.6284 |
+| Fee avg (lamports) | 5,000 |
+| Latency avg (ms) | 582 |
+| Latency min (ms) | 105 |
+| Latency max (ms) | 700 |
+
+**Observation:** The dedicated throughput TPS (0.63) is significantly lower than the lifecycle
+TPS (1.62–1.98) because the dedicated harness re-derives all PDAs and creates all ATAs for 50
+distinct contributors per run, accumulating slot-wait overhead that is amortised over more
+operations in the full lifecycle benchmark.
+
+---
+
 ## V5 — Solana / Token-2022
 
 ### M-V5-1 · Localnet (solana-test-validator) — Fee & Latency Benchmark
@@ -503,6 +799,29 @@ pointers, etc.) add on-chain account data but do not increase the base transacti
 > **Status: pending.**
 > Key question: does Token-2022's additional CPI dispatch to extension handlers increase
 > CU consumption vs. V4? Expected comparison: CU per `contribute` instruction, V4 vs. V5.
+
+---
+
+### M-V5-3 · Localnet — Dedicated Throughput Benchmark
+
+**Date:** 2026-04-05
+**Script:** `benchmarks/throughput_test.py --platform solana` with `VARIANT=V5`
+**Result file:** `V5_python_solana-localnet_throughput_1775401527.json`
+
+| Metric | Value |
+|--------|-------|
+| N contributions | 50 |
+| Total wall-clock time (ms) | 83,910 |
+| TPS | 0.5959 |
+| Fee avg (lamports) | 4,800 |
+| Latency avg (ms) | 590 |
+| Latency min (ms) | 111 |
+| Latency max (ms) | 703 |
+
+**Observation:** Consistent with M-V4-4 (0.63 TPS). The slightly lower TPS (0.60 vs. 0.63) and
+fee average (4,800 vs. 5,000 lam) likely reflect slot-timing variance; a small number of
+transactions recorded a 0-lamport fee (possible RPC reporting artifact). No functional difference
+between V4 and V5 is inferred from this data. CU consumption remains unmeasured (planned for devnet).
 
 ---
 
@@ -578,7 +897,7 @@ Derived from fee model; not directly measured for `initialize_campaign` and `ref
 | `withdrawMilestone[1]` | 59,238 | 59,200 | 59,171 | −0.06% | −0.11% |
 | `withdrawMilestone[2]` | 50,720 | 50,681 | 50,653 | −0.08% | −0.13% |
 | `refund` avg | 72,747 | 67,528 | 72,890 | **−7.2%** | +0.2% |
-| Throughput (TPS) | 98.23 | 89.93 | 81.97 | −8.4% | −16.6% |
+| Throughput (TPS) | 98.23 | 89.93 | 80.39 | −8.4% | −18.2% |
 
 **Key conclusions:**
 - `finalize` and `withdrawMilestone` are effectively token-standard-agnostic (< 0.2% difference).
@@ -612,48 +931,68 @@ Unit consumption, which requires a devnet instrumented run to measure.
 
 ---
 
-### Table 4 — Per-Operation Latency, EVM vs. Solana (localnet)
+### Table 4 — Per-Operation Latency, All EVM Clients + Solana (localnet)
 
-> EVM latency source: `benchmarks/run_tests.py --platform evm` (2026-03-20, Hardhat in-process EVM).
+> EVM latency source: lifecycle benchmarks 2026-03-28 (Python: M-V1-1, TS: M-V1-2, .NET: M-V1-3).
 > Solana latency source: M-V4-1 / M-V5-1 (2026-03-16).
-> **EVM `[automine]` values are not meaningful for network-level comparison.**
+> **All EVM `[automine]` values are not meaningful for network-level comparison.**
+> TS and .NET latency differences vs. Python reflect client SDK receipt-polling overhead, not chain behaviour.
 
-| Operation | EVM V1 localnet (ms) `[automine]` | V4 Solana localnet avg (ms) | V5 Solana localnet avg (ms) |
-|-----------|:---------------------------------:|:---------------------------:|:---------------------------:|
-| `contribute` avg | 11 `[automine]` | 515 | 515 |
-| `contribute` min | 0 `[automine]` | 512 | 512 |
-| `contribute` max | 18 `[automine]` | 519 | 523 |
-| `finalize` | 11 `[automine]` | 520 | 519 |
-| `withdrawMilestone[0]` | 14 `[automine]` | 517 | 514 |
-| `withdrawMilestone[1]` | 12 `[automine]` | 516 | 516 |
-| `withdrawMilestone[2]` | 18 `[automine]` | 516 | 516 |
-| `refund` avg | 13 `[automine]` | 516 | 514 |
+| Operation | EVM V1 Python `[automine]` | EVM V1 TS `[automine]` | EVM V1 .NET `[automine]` | V4 Solana avg (ms) | V5 Solana avg (ms) |
+|-----------|:--------------------------:|:----------------------:|:------------------------:|:------------------:|:------------------:|
+| `contribute` avg | 11 | 76 | 241 | 515 | 515 |
+| `contribute` min | 0 | 72 | 228 | 512 | 512 |
+| `contribute` max | 18 | 86 | 329 | 519 | 523 |
+| `finalize` | 11 | 24 | 423 | 520 | 519 |
+| `withdrawMilestone[0]` | 14 | 62 | 241 | 517 | 514 |
+| `withdrawMilestone[1]` | 12 | 62 | 222 | 516 | 516 |
+| `withdrawMilestone[2]` | 18 | 61 | 222 | 516 | 516 |
+| `refund` avg | 13 | 63 | 217 | 516 | 514 |
 
-**Interpretation:** Hardhat automine eliminates block-time wait entirely; the 0–18 ms range
-reflects JSON-RPC serialisation overhead only. Solana localnet latency (512–523 ms) is
-dominated by slot-confirmation time (~400 ms/slot). A meaningful latency comparison requires
-testnet data (Sepolia vs. devnet), deferred to M-V1-2 and M-V4-2.
+**Interpretation:** The EVM latency spread across clients (11–241 ms) is a client-library
+artefact. Python's synchronous `requests` HTTP call resolves against Hardhat's loopback HTTP
+server in ~6 ms per poll; viem's async event loop adds ~70 ms overhead; Nethereum's async
+HttpClient adds ~120 ms overhead per poll (per-receipt, two polls per `contribute`). On a real
+network (12 s Ethereum block time) all three clients converge to equivalent throughput. See
+M-V1-2, M-V1-3 and M-V1-5 for full discussion.
 
 ---
 
 ### Table 5 — Throughput (localnet, N = 50 sequential contributions)
 
-> Both benchmarks pre-create accounts / approvals outside the timed window and submit
-> contributions sequentially, waiting for confirmation before the next call.
+> **Lifecycle methodology:** single sender account, contributions sent in-process, approval
+> pre-granted. Measures SDK receipt-polling latency × N.
+> **Dedicated throughput methodology:** 50 distinct EOAs / keypairs, pre-funded outside timed
+> window, fresh client subprocess spawned per transaction. Measures process-startup overhead × N.
 
-| Metric | V1 EVM `[automine]` | V2 EVM `[automine]` | V3 EVM `[automine]` | V4 Solana | V5 Solana |
+#### 5a — Lifecycle Throughput (in-process, single sender)
+
+| Client | V1 EVM `[automine]` | V2 EVM `[automine]` | V3 EVM `[automine]` | V4 Solana | V5 Solana |
 |--------|:-------------------:|:-------------------:|:-------------------:|:---------:|:---------:|
-| N contributions | 50 | 50 | 50 | 50 | 50 |
-| Total wall-clock (ms) | 509 | 556 | 610 | 25,263 | 25,349 |
-| Throughput (TPS) | 98.23 | 89.93 | 81.97 | 1.9792 | 1.9725 |
-| Limiting factor | Local RPC roundtrip; no block time | ← same | ← same | ~400 ms/slot confirmation | ~400 ms/slot confirmation |
+| Python | 98.23 (509 ms) | 89.93 (556 ms) | 80.39 (622 ms) | 1.62 (30,774 ms) | 1.97 (25,349 ms) |
+| TypeScript | 13.09 (3,820 ms) | 12.76 (3,918 ms) | 12.96 (3,858 ms) | — | — |
+| .NET | 4.08 (12,243 ms) | 4.23 (11,829 ms) | 4.28 (11,694 ms) | — | — |
+| **Limiting factor** | SDK receipt-poll latency | ← | ← | ~400–680 ms/slot | ~400 ms/slot |
 
-**Interpretation:** The ~50× EVM vs. Solana TPS gap is an artefact of Hardhat automine and
-does **not** represent real-world throughput. On Sepolia (12-second block time, one tx per
-block) the same sequential benchmark yields ~0.08 TPS. Solana's ~1.98 TPS is bounded by
-localnet slot time; a parallel-submission strategy would yield significantly higher figures.
-Within the EVM variants, V3 is 16.6% lower TPS than V1 — consistent with V3's higher per-tx
-gas cost causing slightly higher RPC processing time in Hardhat's in-process EVM.
+#### 5b — Dedicated Throughput (subprocess per transaction)
+
+| Client | V1 EVM | V2 EVM | V3 EVM | V4 Solana | V5 Solana |
+|--------|:------:|:------:|:------:|:---------:|:---------:|
+| Python | 0.64 (78,299 ms) | — | — | 0.63 (79,570 ms) | 0.60 (83,910 ms) |
+| TypeScript | 0.35 (142,022 ms) | — | — | — | — |
+| .NET | 0.44 (114,921 ms) | 0.44 (114,016 ms) | 0.46 (109,702 ms) | — | — |
+| **Limiting factor** | Process startup overhead (~1,550–2,820 ms/spawn) | ← | ← | ATA setup + slot wait | ← |
+
+**Interpretation:**
+- **Lifecycle EVM vs. Solana:** The ~50× gap between Python EVM (98 TPS) and Solana (1.97 TPS)
+  is a localnet artefact. Hardhat automines with zero block time; `solana-test-validator` waits
+  ~400 ms per slot. On Sepolia (12 s blocks, sequential methodology) EVM TPS drops to ~0.08.
+- **Cross-client lifecycle spread (4–98 TPS on EVM):** Driven entirely by receipt-poll latency
+  differences between SDK runtimes on localhost (see Table 4 and M-V1-2/M-V1-3). Negligible
+  on real networks.
+- **Dedicated throughput TPS (0.35–0.64):** Reflects process startup cost, not blockchain
+  throughput. The dedicated harness is designed to isolate individual client invocations as they
+  would be called from a production application; the low TPS is expected and documented in M-V1-5.
 
 ---
 

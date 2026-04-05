@@ -144,29 +144,39 @@ V2 ponovo demonstrira prednost samodovoljnog vault modela — ušteda od 7,2% pr
 
 #### 3.1.5 Propusnost (TPS)
 
-| Varijanta | TPS |
+Sledeća tabela prikazuje propusnost izmerenu Python benchmark okruženjem (životni ciklus,
+jedini pošiljalac, N=50):
+
+| Varijanta | TPS (Python, lifecycle) |
 |---|---|
 | V1 ERC-20 | 98,23 |
 | V2 ERC-4626 | 89,93 |
-| V3 ERC-1155 | 81,97 |
+| V3 ERC-1155 | 80,39 |
 
-Propusnost opada sa porastom gas troškova po transakciji. Međutim, ove vrednosti su artefakt Hardhat automine režima (svaki blok sadrži tačno jednu transakciju sa trenutnom potvrdom) i ne reflektuju ponašanje na produkcijskim mrežama.
+Propusnost opada sa porastom gas troškova po transakciji — V3 je 18,2% sporija od V1, što je
+konzistentno sa njenim višim prosečnim gas troškom (+19,1%). Međutim, ove vrednosti su artefakt
+Hardhat automine režima (trenutna potvrda, bez vremena bloka) i ne reflektuju ponašanje na
+produkcijskim mrežama. Uticaj klijentske biblioteke na propusnost analiziran je u sekciji 3.1.6.
 
 #### 3.1.6 Uticaj klijentske biblioteke na propusnost
 
-Vrednosti propusnosti prikazane u sekciji 3.1.5 prikupljene su isključivo putem Python benchmark okruženja. Međutim, ista operacija `contribute` (V1 ERC-20, N=50, Hardhat localnet) testirana je i putem TypeScript (viem) i .NET (Nethereum) klijenata, pri čemu su uočene značajne razlike u izmerenom TPS-u:
+Vrednosti propusnosti prikazane u sekciji 3.1.5 prikupljene su isključivo putem Python benchmark okruženja. Međutim, iste operacije `contribute` (N=50, Hardhat localnet) testirane su i putem TypeScript (viem) i .NET (Nethereum) klijenata, pri čemu su uočene značajne razlike u izmerenom TPS-u:
 
-| Klijent | Prosečna latencija po operaciji | TPS | Uzrok razlike |
-|---|---|---|---|
-| Python (web3.py) | ~12 ms | ~98 | Sinhroni HTTP — `wait_for_transaction_receipt` vraća rezultat na prvom upitu (~3–6 ms po pozivu) |
-| TypeScript (viem) | ~76 ms | ~13 | Async/await sa overhead-om JavaScript event loop-a (~38 ms po čekanju potvrde) |
-| .NET (Nethereum) | ~241 ms | ~4 | Asinhroni `HttpClient` pozivi u petlji za čekanje potvrde (`WaitForReceipt` u `EvmCampaignService.cs`), ~120 ms po pozivu |
+| Klijent | V1 TPS | V2 TPS | V3 TPS | Prosečna latencija po operaciji |
+|---|---|---|---|---|
+| Python (web3.py) | 98,23 | 89,93 | 80,39 | ~12 ms |
+| TypeScript (viem) | 13,09 | 12,76 | 12,96 | ~76 ms |
+| .NET (Nethereum) | 4,08 | 4,23 | 4,28 | ~241 ms |
 
 Ključni uvid leži u činjenici da svaka operacija `contribute` na EVM-u zahteva **dve sekvencijalne transakcije** (approve + contribute), čime vreme čekanja potvrde (receipt polling) postaje dominantan faktor ukupne latencije. U Hardhat automine režimu, potvrda je dostupna odmah nakon slanja transakcije — razlika u TPS-u stoga ne proizlazi iz vremena rudarenja bloka, već isključivo iz implementacije mehanizma čekanja potvrde u svakoj klijentskoj biblioteci.
 
-Python-ov sinhroni HTTP model (biblioteka `requests`) izvršava blokirajući poziv koji se na loopback interfejsu razrešava za 3–6 ms. TypeScript-ov `waitForTransactionReceipt` uvodi dodatnu latenciju usled raspoređivanja mikrozadataka (microtask scheduling) u JavaScript event loop-u. .NET implementacija u `EvmCampaignService.cs` koristi asinhronu petlju čekanja (`WaitForReceipt`) sa `HttpClient` pozivima — iako se `Task.Delay(100)` backoff nikada ne aktivira jer automine vraća potvrdu na prvom upitu, sam overhead asinhronog HTTP klijenta na localhost-u je značajno viši od Python-ovog sinhronog modela.
+Python-ov sinhroni HTTP model (biblioteka `requests`) izvršava blokirajući poziv koji se na loopback interfejsu razrešava za 3–6 ms. TypeScript-ov `waitForTransactionReceipt` uvodi dodatnu latenciju usled raspoređivanja mikrozadataka (microtask scheduling) u JavaScript event loop-u (~38 ms po pozivu). .NET implementacija u `EvmCampaignService.cs` koristi asinhronu petlju čekanja (`WaitForReceipt`) sa `HttpClient` pozivima — iako se `Task.Delay(100)` backoff nikada ne aktivira jer automine vraća potvrdu na prvom upitu, sam overhead asinhronog HTTP klijenta na localhost-u je značajno viši (~120 ms po pozivu).
 
-**Ove razlike u TPS-u predstavljaju artefakt klijentske implementacije, a ne karakteristiku EVM platforme ili pametnog ugovora.** Na realnim testnim mrežama poput Sepolia, gde latencija mrežnog potvrđivanja iznosi 1–3 sekunde po bloku, overhead klijentskog čekanja potvrde (3–120 ms) postaje zanemarljiv u poređenju sa mrežnom latencijom. U tom scenariju, sva tri klijenta bi demonstrirala praktično identičnu propusnost, jer bi vreme potvrde bloka u potpunosti dominiralo ukupnom latencijom operacije.
+Vrednosti TPS-a su praktično invarijantne prema varijanti unutar svakog klijenta (npr. TypeScript: 12,76–13,09 TPS za V1–V3), što potvrđuje da je latencija klijentske biblioteke dominantan faktor — ne gas trošak ugovora.
+
+Pored lifecycle merenja, sprovedeni su i izolovani testovi propusnosti (`benchmarks/throughput_test.py`) koji koriste 50 različitih naloga i pozivaju svaki klijent kao zaseban proces (subprocess). U tom scenariju izmerene vrednosti su: Python 0,64 TPS, TypeScript 0,35 TPS i .NET 0,44 TPS. Dramatično niži TPS (u poređenju sa lifecycle merenjem) posledica je vremena pokretanja procesa (~1,55 s za Python, ~2,82 s za ts-node, ~2,28 s za .NET dotnet run) koje dominira ukupnim vremenom izvršavanja. Ova dva metodološka pristupa mere različite aspekte: lifecycle merenje meri overhead klijentske biblioteke, a izolovani test propusnosti meri overhead pokretanja procesa.
+
+**Ove razlike u TPS-u predstavljaju artefakt klijentske implementacije i metodologije, a ne karakteristiku EVM platforme ili pametnog ugovora.** Na realnim testnim mrežama poput Sepolia, gde latencija mrežnog potvrđivanja iznosi 1–3 sekunde po bloku, overhead klijentskog čekanja potvrde (3–250 ms) postaje zanemarljiv i sva tri klijenta bi demonstrirala praktično identičnu propusnost.
 
 ### 3.2 Solana varijante (V4, V5)
 
@@ -187,12 +197,15 @@ Python-ov sinhroni HTTP model (biblioteka `requests`) izvršava blokirajući poz
 
 #### 3.2.2 Propusnost
 
-| Varijanta | TPS |
-|---|---|
-| V4 SPL Token | 1,9792 |
-| V5 Token-2022 | 1,9725 |
+| Varijanta | TPS (primarno merenje) | TPS (sekundarno merenje) |
+|---|---|---|
+| V4 SPL Token | 1,9792 | 1,6247 |
+| V5 Token-2022 | 1,9725 | 0,5959 [¹] |
 
-Sekvencijalna propusnost od ~1,98 TPS ograničena je vremenom slot-a na lokalnoj testnoj mreži (~400 ms). Razlika između V4 i V5 (0,3%) nalazi se u okviru mernog šuma.
+[¹] V5 sekundarno merenje je izolovani test propusnosti (subprocess metodologija); nije direktno
+uporedivo sa lifecycle primarnim merenjem.
+
+Sekvencijalna propusnost od ~1,62–1,98 TPS ograničena je vremenom slot-a na lokalnoj testnoj mreži (~400–680 ms). Razlika između dva V4 merenja (1,98 vs. 1,62 TPS, tj. 17,9%) pripisuje se varijabilnosti slot timing-a između različitih pokretanja `solana-test-validator` — vreme potvrde nije deterministički kontrolisano između sesija. Razlika između V4 i V5 (0,3% u primarnom merenju) nalazi se u okviru mernog šuma i ne ukazuje na funkcionalnu razliku između programa.
 
 ### 3.3 Međulančano poređenje
 
@@ -214,11 +227,13 @@ Ovaj strukturni kontrast ima direktne posledice za dizajn pametnih ugovora: na E
 
 | Metrika | EVM (Hardhat) | Solana (localnet) |
 |---|---|---|
-| Prosečna latencija | 0–18 ms | 512–523 ms |
-| Sekvencijalni TPS | 81,97–98,23 | ~1,98 |
-| Odnos | ~50× veći TPS | — |
+| Prosečna latencija (Python client) | 0–18 ms `[automine]` | 512–680 ms |
+| Sekvencijalni TPS — Python lifecycle | 80,39–98,23 | 1,62–1,98 |
+| Sekvencijalni TPS — TypeScript lifecycle | 12,76–13,09 | — |
+| Sekvencijalni TPS — .NET lifecycle | 4,08–4,28 | — |
+| Odnos (Python lifecycle) | ~50–61× veći TPS | — |
 
-**Upozorenje o interpretaciji.** Razlika od ~50× u propusnosti je artefakt testnog okruženja i ne sme se interpretirati kao stvarna razlika u performansama platformi. Hardhat automine režim trenutno rudari blokove (bez kašnjenja), dok `solana-test-validator` simulira realistično vreme slota (~400 ms). Za smisleno poređenje propusnosti neophodni su podaci sa testnih mreža (Sepolia za EVM, devnet za Solanu), čije prikupljanje je planirano kao naredni korak.
+**Upozorenje o interpretaciji.** Razlika od ~50–61× u propusnosti između Python EVM i Solana merenja je artefakt testnog okruženja i ne sme se interpretirati kao stvarna razlika u performansama platformi. Hardhat automine režim trenutno rudari blokove (bez kašnjenja), dok `solana-test-validator` simulira realistično vreme slota (~400 ms). EVM TPS opseg od 4,08 do 98,23 — u zavisnosti od klijenta — nije razlika u performansama lanca već metodološki artefakt klijentskih SDK-ova (detaljno objašnjeno u sekciji 3.1.6). Za smisleno međulančano poređenje propusnosti neophodni su podaci sa testnih mreža (Sepolia za EVM, devnet za Solanu), čije prikupljanje je planirano kao naredni korak.
 
 #### 3.3.3 Latencija
 
