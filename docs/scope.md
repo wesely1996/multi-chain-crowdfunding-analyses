@@ -35,7 +35,7 @@ the controlled baseline, which are planned extensions, and what is intentionally
 | 4 | SPL Token (classic) | Solana | SPL | **Implemented** | Direct counterpart to ERC-20; classic SPL Token program |
 | 5 | Token-2022 (SPL extensions) | Solana | Token-2022 | **Implemented** | Separate Anchor program (`crowdfunding_token2022`); 9/9 tests passing |
 
-`[fact]` All five variants are implemented. Localnet benchmark runs for all five variants are complete (see `benchmarks/results/`). Testnet runs (Sepolia, Solana devnet) are pending.
+`[fact]` All five variants are implemented. Localnet benchmark runs for all five variants are complete (see `benchmarks/results/`). Testnet/public-network deployment is not planned; all performance conclusions are derived from localnet results combined with publicly available network data.
 
 ---
 
@@ -177,14 +177,17 @@ baselines before spending real testnet funds. Rationale:
 Localnet data is used in `docs/measurements.md` as a reference baseline but is **not displayed
 in the dashboard**.
 
-**Tier 2 — Testnet (dashboard and final thesis data):**
-`[fact]` All dashboard results and final thesis comparative measurements are collected on
-**Sepolia** (EVM variants V1–V3) and **Solana devnet** (Solana variants V4–V5). Testnet data
-captures real network latency, fee market conditions, and slot-confirmation timing.
+**Tier 2 — Public network data (thesis context only):**
+`[fact]` No contracts are deployed to any public network (Sepolia, Solana devnet, or mainnet).
+All benchmark measurements are collected exclusively on localnet (Tier 1). Real-network latency,
+fee market conditions, slot-confirmation timing, and USD cost figures are sourced from publicly
+available data (network explorers, official documentation, peer-reviewed benchmarks) and cited
+with IEEE references in the thesis where used for contextualisation.
 
-`[assumption]` Localnet gas unit counts are deterministic and equal to testnet gas units (EVM
-gas is network-independent). Absolute latency and fee values differ on testnet due to network
-conditions and fee market dynamics — the thesis analysis must acknowledge this difference.
+`[fact]` EVM gas unit counts measured on localnet are equivalent to mainnet gas units — EVM
+gas consumption is determined by opcode execution and is network-independent. Absolute
+latency and fiat cost values are explicitly qualified as public-data estimates, not direct
+measurements, in all thesis analysis sections.
 
 ---
 

@@ -184,18 +184,18 @@ uses an async `HttpClient` call per poll. Even with Hardhat automine (receipt av
 the first poll, so the `Task.Delay(100)` backoff never fires), the .NET async HTTP client
 has ~120 ms of per-request overhead on loopback vs. Python's synchronous ~6 ms. Each
 `contribute` operation issues two transactions (approve + contribute), so 2 × 120 ms ≈ 241 ms.
-On testnet this overhead is immaterial.
+On public networks this overhead is immaterial relative to actual block confirmation latency.
 
 ---
 
 ### M-V1-4 · Sepolia Testnet — Gas Benchmark
 
-> **Status: pending.**
-> Testnet deployment configuration is in place (`contracts/evm/.env.example`,
-> `hardhat.config.ts` `sepolia` network entry). Measurements will be recorded here after the
-> first successful Sepolia deployment and benchmark run. Expected additional columns:
-> `gasPrice (gwei)`, `cost (ETH)`, `cost (USD at time of measurement)`,
-> `block confirmation latency (s)`.
+> **Status: not planned.**
+> It was decided that contracts will not be deployed to any public/testnet network.
+> All gas-unit conclusions are derived from localnet runs (M-V1-1 through M-V1-3).
+> USD cost estimates and real-network latency figures are derived from publicly available
+> Ethereum mainnet/testnet data (historical gas prices, block confirmation statistics)
+> and cited accordingly in the thesis analysis.
 
 ---
 
@@ -399,7 +399,9 @@ See M-V1-5 for methodology note on process-startup overhead.
 
 ### M-V2-5 · Sepolia Testnet — Gas Benchmark
 
-> **Status: pending.** Same methodology as M-V1-4 applied to `CrowdfundingCampaign4626`.
+> **Status: not planned.** Testnet deployment will not be performed. Gas-unit results are
+> taken from localnet runs (M-V2-1 through M-V2-4). USD cost estimates are derived from
+> publicly available Ethereum gas price data.
 
 ---
 
@@ -566,7 +568,9 @@ See M-V1-5 for methodology note on process-startup overhead.
 
 ### M-V3-5 · Sepolia Testnet — Gas Benchmark
 
-> **Status: pending.** Same methodology as M-V1-4 applied to `CrowdfundingCampaign1155`.
+> **Status: not planned.** Testnet deployment will not be performed. Gas-unit results are
+> taken from localnet runs (M-V3-1 through M-V3-4). USD cost estimates are derived from
+> publicly available Ethereum gas price data.
 
 ---
 
@@ -665,16 +669,18 @@ One latency outlier (−318 ms, clock-wrap artifact) excluded from average.
 **Observation — sequential throughput [note]:**
 The 1.98 TPS figure reflects a worst-case sequential benchmark: each contribution is submitted
 and confirmed before the next is issued. Localnet slot time (~400 ms) is the dominant factor.
-On devnet the per-transaction latency is typically higher (500–1,500 ms) but the sequential TPS
-methodology is identical to the EVM benchmark for controlled comparison.
+On public Solana networks the per-transaction latency is typically higher (500–1,500 ms); this
+is documented using publicly available Solana network statistics rather than direct measurement.
 
 ---
 
 ### M-V4-2 · Devnet — Fee & Latency Benchmark
 
-> **Status: pending.**
-> Expected additional columns: `slot confirmation latency (s)`, `prioritization fee (lamports)`,
-> `cost (USD at time of measurement)`, `CU consumed per instruction`.
+> **Status: not planned.**
+> It was decided that contracts will not be deployed to any public/testnet network.
+> Solana fee conclusions are derived from localnet runs (M-V4-1, M-V4-3, M-V4-4).
+> Real-network slot confirmation latency, prioritization fees, USD cost, and Compute Unit
+> consumption are sourced from publicly available Solana network data and cited in the thesis.
 
 ---
 
@@ -796,9 +802,10 @@ pointers, etc.) add on-chain account data but do not increase the base transacti
 
 ### M-V5-2 · Devnet — Fee & Latency Benchmark
 
-> **Status: pending.**
-> Key question: does Token-2022's additional CPI dispatch to extension handlers increase
-> CU consumption vs. V4? Expected comparison: CU per `contribute` instruction, V4 vs. V5.
+> **Status: not planned.**
+> Devnet deployment will not be performed. Fee conclusions are derived from localnet runs
+> (M-V5-1, M-V5-3). The question of V4 vs. V5 CU consumption difference is addressed
+> using publicly available Token-2022 extension documentation and community benchmarks.
 
 ---
 
@@ -821,17 +828,17 @@ pointers, etc.) add on-chain account data but do not increase the base transacti
 **Observation:** Consistent with M-V4-4 (0.63 TPS). The slightly lower TPS (0.60 vs. 0.63) and
 fee average (4,800 vs. 5,000 lam) likely reflect slot-timing variance; a small number of
 transactions recorded a 0-lamport fee (possible RPC reporting artifact). No functional difference
-between V4 and V5 is inferred from this data. CU consumption remains unmeasured (planned for devnet).
+between V4 and V5 is inferred from this data. CU consumption was not measured in localnet runs; this is addressed using publicly available Token-2022 benchmark data.
 
 ---
 
 ## Cross-Chain Summary Tables
 
-> **Localnet baseline (reference only).** The tables below are localnet measurements used for
-> harness validation and initial gas/fee baselines.
-> USD fiat costs require testnet runs with a known gas price or SOL price at time of measurement.
-> All fiat cells are `—` (pending) until M-V1-2 and M-V4-2 are completed on testnet.
-> No fiat values have been invented or estimated.
+> **Localnet measurements (primary data source).** The tables below are localnet measurements
+> used as the primary basis for all thesis conclusions. No testnet or public network deployment
+> is planned. USD fiat cost estimates are derived from publicly available gas price and SOL
+> price data (cited in the thesis) applied to the localnet gas/fee measurements.
+> No fiat values have been invented or estimated without a cited source.
 >
 > **Result file naming.** All benchmark scripts write results to `benchmarks/results/` using
 > the convention `{VARIANT}_{CLIENT}_{ENV}_{KIND}_{TIMESTAMP}.json`

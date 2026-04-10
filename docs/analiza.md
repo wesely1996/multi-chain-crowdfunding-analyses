@@ -233,11 +233,11 @@ Ovaj strukturni kontrast ima direktne posledice za dizajn pametnih ugovora: na E
 | Sekvencijalni TPS — .NET lifecycle | 4,08–4,28 | — |
 | Odnos (Python lifecycle) | ~50–61× veći TPS | — |
 
-**Upozorenje o interpretaciji.** Razlika od ~50–61× u propusnosti između Python EVM i Solana merenja je artefakt testnog okruženja i ne sme se interpretirati kao stvarna razlika u performansama platformi. Hardhat automine režim trenutno rudari blokove (bez kašnjenja), dok `solana-test-validator` simulira realistično vreme slota (~400 ms). EVM TPS opseg od 4,08 do 98,23 — u zavisnosti od klijenta — nije razlika u performansama lanca već metodološki artefakt klijentskih SDK-ova (detaljno objašnjeno u sekciji 3.1.6). Za smisleno međulančano poređenje propusnosti neophodni su podaci sa testnih mreža (Sepolia za EVM, devnet za Solanu), čije prikupljanje je planirano kao naredni korak.
+**Upozorenje o interpretaciji.** Razlika od ~50–61× u propusnosti između Python EVM i Solana merenja je artefakt testnog okruženja i ne sme se interpretirati kao stvarna razlika u performansama platformi. Hardhat automine režim trenutno rudari blokove (bez kašnjenja), dok `solana-test-validator` simulira realistično vreme slota (~400 ms). EVM TPS opseg od 4,08 do 98,23 — u zavisnosti od klijenta — nije razlika u performansama lanca već metodološki artefakt klijentskih SDK-ova (detaljno objašnjeno u sekciji 3.1.6). Za kontekstualizaciju stvarnih mrežnih performansi korišćeni su javno dostupni podaci o propusnosti i latenciji Ethereum i Solana mreža (statistike mrežnih explorera i zvanična dokumentacija).
 
 #### 3.3.3 Latencija
 
-Merenja latencije na lokalnim mrežama nisu direktno uporediva usled fundamentalno različitih mehanizama potvrde. EVM Hardhat latencija (0–18 ms) reflektuje samo vreme izvršavanja transakcije bez mrežnog kašnjenja, dok Solana latencija (~500 ms) uključuje čekanje na potvrdu u narednom slotu. Smisleno poređenje latencije zahteva merenja na testnim mrežama sa realističnim mrežnim uslovima.
+Merenja latencije na lokalnim mrežama nisu direktno uporediva usled fundamentalno različitih mehanizama potvrde. EVM Hardhat latencija (0–18 ms) reflektuje samo vreme izvršavanja transakcije bez mrežnog kašnjenja, dok Solana latencija (~500 ms) uključuje čekanje na potvrdu u narednom slotu. Kontekstualizacija realnih mrežnih latencija oslanja se na javno dostupne podatke: prosečno vreme potvrde transakcija na Ethereum mainnet mreži iznosi 12–15 s, a na Solana mainnet mreži 400–800 ms po slotu, prema zvaničnoj dokumentaciji i podacima mrežnih explorera.
 
 ### 3.4 Nalaz o iskustvu programera (Developer Experience)
 
@@ -271,6 +271,6 @@ Na osnovu sprovedene analize implementacione kompleksnosti i merenja performansi
 
 4. **TypeScript klijent pruža najbolji odnos kompaktnosti i funkcionalnosti** (495 LOC, ocena 8.2/10), dok .NET klijent trpi najveće opterećenje manuelnom implementacijom (814 LOC, ocena 6.8/10) usled odsustva zrelog Solana SDK-a. Python klijent, uprkos najvećem obimu koda (1.146 LOC), postiže visoku ocenu (8.0/10) zahvaljujući odličnoj iskorišćenosti anchorpy biblioteke, ali zaostaje u paralelizaciji RPC poziva.
 
-5. **Merenja propusnosti na lokalnim mrežama nisu direktno uporediva** između EVM i Solana platformi usled fundamentalno različitih mehanizama potvrde u testnim okruženjima. Razlika od ~50× u TPS vrednostima je artefakt konfiguracije, ne inherentna karakteristika platformi. Prikupljanje podataka sa testnih mreža (Sepolia, devnet) ostaje prioritetan naredni korak za validno međulančano poređenje.
+5. **Merenja propusnosti na lokalnim mrežama nisu direktno uporediva** između EVM i Solana platformi usled fundamentalno različitih mehanizama potvrde u testnim okruženjima. Razlika od ~50× u TPS vrednostima je artefakt konfiguracije, ne inherentna karakteristika platformi. Međulančano poređenje realnih performansi zasnovano je na javno dostupnim podacima o propusnosti i latenciji Ethereum i Solana mainnet mreža.
 
 6. **Solana platforma zahteva značajno veći inicijalni napor** za razvoj (dvostruko veći obim koda ugovora, trostruko više koraka za podešavanje), ali nakon uspostavljanja razvojnog okruženja, klijentske biblioteke sa IDL podrškom (Anchor TS, anchorpy) značajno smanjuju kompleksnost integracije na nivo uporediv sa EVM ekosistemom.
