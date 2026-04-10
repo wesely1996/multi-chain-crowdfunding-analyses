@@ -11,6 +11,8 @@ interface FilterBarProps {
   setClient: (v: string) => void;
   environment: string;
   setEnvironment: (v: string) => void;
+  kind: string;
+  setKind: (v: string) => void;
   onRefresh: () => void;
 }
 
@@ -26,11 +28,15 @@ export default function FilterBar({
   setClient,
   environment,
   setEnvironment,
+  kind,
+  setKind,
   onRefresh,
 }: FilterBarProps) {
   const environments = Array.from(
     new Set(results.map((r) => r.environment)),
   ).sort();
+
+  const kinds = ["lifecycle", "throughput"] as const;
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -72,6 +78,20 @@ export default function FilterBar({
         {environments.map((env) => (
           <option key={env} value={env}>
             {env}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={kind}
+        onChange={(e) => setKind(e.target.value)}
+        className={SELECT_CLASS}
+        aria-label="Filter by run kind"
+      >
+        <option value="all">All kinds</option>
+        {kinds.map((k) => (
+          <option key={k} value={k}>
+            {k}
           </option>
         ))}
       </select>

@@ -55,7 +55,8 @@ function groupByKind(results: BenchmarkFile[], kind: Kind): Map<string, Benchmar
 function buildLatest(results: BenchmarkFile[], kind: Kind): ChartPoint[] {
   const groups = groupByKind(results, kind);
   return Array.from(groups.values()).map((runs) => {
-    const r = runs.reduce((a, b) => (b.timestamp_utc > a.timestamp_utc ? b : a));
+    const r = runs.reduce((best, cur) => (cur.timestamp_utc > best.timestamp_utc ? cur : best));
+    const feeAvg = (r.throughput.per_tx_fee ?? r.throughput.per_tx_fee_lamports)?.avg ?? null;
     return {
       name: buildLabel(r),
       variant: r.variant,
@@ -63,7 +64,7 @@ function buildLatest(results: BenchmarkFile[], kind: Kind): ChartPoint[] {
       cost: costPerTps(
         r.throughput.tps,
         r.throughput.per_tx_gas?.avg ?? null,
-        r.throughput.per_tx_fee?.avg ?? null,
+        feeAvg,
       ),
     };
   });
@@ -76,7 +77,7 @@ function buildAverage(results: BenchmarkFile[], kind: Kind): ChartPoint[] {
     const n = runs.length;
     const avgTps = runs.reduce((s, r) => s + r.throughput.tps, 0) / n;
     const gasValues = runs.map((r) => r.throughput.per_tx_gas?.avg ?? null).filter((v): v is number => v !== null);
-    const feeValues = runs.map((r) => r.throughput.per_tx_fee?.avg ?? null).filter((v): v is number => v !== null);
+    const feeValues = runs.map((r) => (r.throughput.per_tx_fee ?? r.throughput.per_tx_fee_lamports)?.avg ?? null).filter((v): v is number => v !== null);
     const avgGas = gasValues.length > 0 ? gasValues.reduce((s, v) => s + v, 0) / gasValues.length : null;
     const avgFee = feeValues.length > 0 ? feeValues.reduce((s, v) => s + v, 0) / feeValues.length : null;
     return {
@@ -131,7 +132,7 @@ export default function CompareChart({ results }: Props) {
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
           <p className="text-xs text-gray-400 mb-3 font-medium">
             {(() => {
-              const maxN = mode === "average" ? Math.max(...chartData.map((d) => d.n ?? 1)) : 0;
+              const maxN = mode === "average" ? Math.max(0, ...chartData.map((d) => d.n ?? 0)) : 0;
               return maxN > 1 ? `Throughput (TPS) — avg over up to ${maxN} runs` : "Throughput (TPS)";
             })()}
           </p>
@@ -146,7 +147,7 @@ export default function CompareChart({ results }: Props) {
                 itemStyle={{ color: "#9ca3af" }}
                 formatter={(v, _name, entry) => {
                   const n = (entry?.payload as ChartPoint)?.n;
-                  const label = mode === "average" && n ? `${v} TPS (n=${n})` : `${v} TPS`;
+                  const label = mode === "average" && n != null ? `${v} TPS (n=${n})` : `${v} TPS`;
                   return [label, "Throughput"];
                 }}
               />
@@ -177,7 +178,7 @@ export default function CompareChart({ results }: Props) {
                   itemStyle={{ color: "#9ca3af" }}
                   formatter={(v, _name, entry) => {
                     const n = (entry?.payload as ChartPoint)?.n;
-                    const label = mode === "average" && n
+                    const label = mode === "average" && n != null
                       ? `${Number(v).toLocaleString()} (n=${n})`
                       : Number(v).toLocaleString();
                     return [label, "fee units / TPS"];

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BenchmarkFile } from "@/lib/types";
 import { formatGas, formatMs, formatTps, costPerTpsToRsd } from "@/lib/format";
+import { VARIANT_LABELS } from "@/lib/chart-constants";
 import { MetricCard } from "@/components/MetricCard";
 import FilterBar from "@/components/FilterBar";
 import OperationsTable from "@/components/OperationsTable";
@@ -83,7 +84,7 @@ function ResultCard({ result, isSelected, onClick }: ResultCardProps) {
     >
       <div className="flex justify-between items-start mb-3">
         <span className="font-mono text-sm font-semibold text-white">
-          {result.variant} · {result.client}
+          {VARIANT_LABELS[result.variant] ?? result.variant} · {result.client}{result.kind ? ` · ${result.kind}` : ""}
         </span>
         <span
           className={`text-xs px-2 py-0.5 rounded font-mono ${platformBadge}`}
@@ -141,7 +142,7 @@ function ResultDetail({ result }: ResultDetailProps) {
     <section className="space-y-4">
       <div className="flex flex-wrap items-baseline gap-3">
         <h2 className="text-xs uppercase tracking-widest text-gray-500">
-          Detail — {result.variant} / {result.client} / {result.environment}
+          Detail — {VARIANT_LABELS[result.variant] ?? result.variant} / {result.client}{result.kind ? ` / ${result.kind}` : ""} / {result.environment}
         </h2>
         <span className="text-xs text-gray-600">
           {formatTimestamp(result.timestamp_utc)}
@@ -238,6 +239,7 @@ export default function DashboardPage() {
   const [variant, setVariant] = useState("all");
   const [client, setClient] = useState("all");
   const [environment, setEnvironment] = useState("all");
+  const [kind, setKind] = useState("all");
 
   const [selected, setSelected] = useState<BenchmarkFile | null>(null);
 
@@ -263,22 +265,10 @@ export default function DashboardPage() {
     if (variant !== "all" && r.variant !== variant) return false;
     if (client !== "all" && r.client !== client) return false;
     if (environment !== "all" && r.environment !== environment) return false;
+    if (kind !== "all" && r.kind !== kind) return false;
     return true;
   });
 
-  // Deduplicated view for result cards — latest per (variant, client, environment, kind).
-  const latestFiltered = (() => {
-    const seen = new Map<string, BenchmarkFile>();
-    for (const r of filtered) {
-      const key = `${r.variant}_${r.client}_${r.environment}_${r.kind}`;
-      const existing = seen.get(key);
-      if (!existing || r.timestamp_utc > existing.timestamp_utc)
-        seen.set(key, r);
-    }
-    return Array.from(seen.values()).sort(
-      (a, b) => b.timestamp_utc - a.timestamp_utc,
-    );
-  })();
 
   // Keep the selected result valid after filter or data changes
   useEffect(() => {
@@ -286,7 +276,7 @@ export default function DashboardPage() {
       setSelected(filtered[0] ?? null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variant, client, environment, results]);
+  }, [variant, client, environment, kind, results]);
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -312,6 +302,8 @@ export default function DashboardPage() {
             setClient={setClient}
             environment={environment}
             setEnvironment={setEnvironment}
+            kind={kind}
+            setKind={setKind}
             onRefresh={fetchResults}
           />
 
@@ -331,13 +323,13 @@ export default function DashboardPage() {
 
           {filtered.length > 0 && (
             <>
-              {/* Clickable result cards — latest run per (variant, client, environment, kind) */}
+              {/* Clickable result cards — all runs, newest first */}
               <section>
                 <h2 className="text-xs uppercase tracking-widest text-gray-500 mb-3">
-                  Results ({latestFiltered.length})
+                  Results ({filtered.length})
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[340px] overflow-y-auto pr-1">
-                  {latestFiltered.map((r) => (
+                  {filtered.map((r) => (
                     <ResultCard
                       key={r.timestamp_utc}
                       result={r}
@@ -348,8 +340,8 @@ export default function DashboardPage() {
                 </div>
               </section>
 
-              {/* Comparative Analysis — all runs passed so average mode uses full history */}
-              {latestFiltered.length > 1 && <CompareChart results={filtered} />}
+              {/* Comparative Analysis — filtered results so filters affect both sections */}
+              {filtered.length > 1 && <CompareChart results={filtered} />}
 
               {/* Full detail for the selected result */}
               {selected && <ResultDetail result={selected} />}

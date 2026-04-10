@@ -1,7 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import path from "path";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
@@ -10,18 +10,175 @@ import type { PriceSnapshot } from "@/lib/types";
 
 const REPO_ROOT = path.resolve(process.cwd(), "..");
 
-/** Resolve the Python interpreter: prefer repo-root .venv, fall back to system python. */
-function resolvePython(): string {
-  const winVenv = path.join(REPO_ROOT, "clients", "python", ".venv", "Scripts", "python.exe");
-  const unixVenv = path.join(REPO_ROOT, "clients", "python", ".venv", "bin", "python");
-  if (existsSync(winVenv)) return winVenv;
-  if (existsSync(unixVenv)) return unixVenv;
-  return "python";
-}
-
-const PYTHON = resolvePython();
+const VENV_PYTHON =
+  process.platform === "win32"
+    ? path.join(REPO_ROOT, "clients", "python", ".venv", "Scripts", "python.exe")
+    : path.join(REPO_ROOT, "clients", "python", ".venv", "bin", "python");
 
 const RESULTS_DIR = path.join(REPO_ROOT, "benchmarks", "results");
+
+// ── Python resolution ─────────────────────────────────────────────────────────
+
+/**
+ * Find a Python 3.12 interpreter on the host system.
+ * Returns { cmd, extraArgs } so callers can do spawn(cmd, [...extraArgs, script]).
+ */
+function findSystemPython(): { cmd: string; extraArgs: string[] } | null {
+  const candidates: { cmd: string; extraArgs: string[] }[] =
+    process.platform === "win32"
+      ? [
+          { cmd: "py",         extraArgs: ["-3.12"] },
+          { cmd: "python3.12", extraArgs: [] },
+          { cmd: "python3",    extraArgs: [] },
+          { cmd: "python",     extraArgs: [] },
+        ]
+      : [
+          { cmd: "python3.12", extraArgs: [] },
+          { cmd: "python3",    extraArgs: [] },
+          { cmd: "python",     extraArgs: [] },
+        ];
+
+  for (const { cmd, extraArgs } of candidates) {
+    try {
+      const result = spawnSync(cmd, [...extraArgs, "--version"], { timeout: 5000 });
+      const output = (result.stdout ?? result.stderr ?? "").toString();
+      if (result.status === 0 && /Python 3\.(1[2-9]|[2-9]\d)/.test(output)) {
+        return { cmd, extraArgs };
+      }
+    } catch {
+      // binary not on PATH — try next
+    }
+  }
+  return null;
+}
+
+/** Resolve the Python interpreter to use for benchmark scripts. */
+function resolvePython(): string {
+  if (existsSync(VENV_PYTHON)) return VENV_PYTHON;
+  return "python"; // placeholder — replaced after ensureVenv()
+}
+
+// ── Venv bootstrap ────────────────────────────────────────────────────────────
+
+// Singleton promise so concurrent requests don't double-bootstrap.
+let venvReady: Promise<void> | null = null;
+
+function runStage(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  onOutput: (line: string) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    proc.stdout.on("data", (chunk: Buffer) => onOutput(chunk.toString()));
+    proc.stderr.on("data", (chunk: Buffer) => onOutput(chunk.toString()));
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} ${args.join(" ")} exited with code ${code}`));
+    });
+    proc.on("error", reject);
+  });
+}
+
+/**
+ * Ensure the Python venv exists with all required packages.
+ * Creates and populates it on first call; subsequent calls are no-ops.
+ * Output is forwarded to onOutput so the dashboard live-log shows progress.
+ */
+function ensureVenv(onOutput: (line: string) => void): Promise<void> {
+  if (existsSync(VENV_PYTHON)) return Promise.resolve();
+
+  if (!venvReady) {
+    venvReady = (async () => {
+      const sys = findSystemPython();
+      if (!sys) {
+        throw new Error(
+          "Python 3.12+ not found. Install Python 3.12 and retry.\n" +
+          "Windows: winget install Python.Python.3.12\n" +
+          "Linux/WSL: sudo apt install python3.12 python3.12-venv",
+        );
+      }
+
+      onOutput(`[setup] Found system Python: ${sys.cmd} ${sys.extraArgs.join(" ")}\n`);
+      onOutput(`[setup] Creating venv at clients/python/.venv …\n`);
+
+      const venvDir = path.dirname(path.dirname(VENV_PYTHON)); // clients/python/.venv
+
+      await runStage(
+        sys.cmd,
+        [...sys.extraArgs, "-m", "venv", venvDir],
+        REPO_ROOT,
+        onOutput,
+      );
+
+      // Resolve pip inside the newly created venv
+      const pip =
+        process.platform === "win32"
+          ? path.join(venvDir, "Scripts", "pip.exe")
+          : path.join(venvDir, "bin", "pip");
+
+      onOutput("[setup] Upgrading pip…\n");
+      await runStage(pip, ["install", "--upgrade", "pip", "--quiet"], REPO_ROOT, onOutput);
+
+      // Stage 1: web3 without deps (bypasses lru-dict<1.3.0 pin)
+      onOutput("[setup] Stage 1/4: web3==6.20.3 (no-deps)…\n");
+      await runStage(pip, ["install", "--no-deps", "web3==6.20.3"], REPO_ROOT, onOutput);
+
+      // Stage 2: lru-dict — 1.3.0 has prebuilt wheels on all platforms
+      onOutput("[setup] Stage 2/4: lru-dict==1.3.0…\n");
+      await runStage(pip, ["install", "lru-dict==1.3.0"], REPO_ROOT, onOutput);
+
+      // Stage 3: Solana stack
+      onOutput("[setup] Stage 3/4: solana + anchorpy…\n");
+      await runStage(
+        pip,
+        ["install",
+          "solana==0.36.6",
+          "solders==0.26.0",
+          "anchorpy==0.21.0",
+          "tabulate==0.9.0",
+        ],
+        REPO_ROOT,
+        onOutput,
+      );
+
+      // Stage 4: web3 transitive dependencies
+      onOutput("[setup] Stage 4/4: web3 transitive deps…\n");
+      await runStage(
+        pip,
+        ["install",
+          "eth-abi>=4.0.0",
+          "eth-account>=0.8.0,<0.13",
+          "eth-typing>=3.0.0,<5",
+          "eth-utils>=2.1.0,<5",
+          "hexbytes>=0.1.0,<0.4.0",
+          "eth-hash[pycryptodome]>=0.5.1",
+          "jsonschema>=4.0.0",
+          "protobuf>=4.21.6",
+          "aiohttp",
+          "requests",
+          "pyunormalize",
+          "rlp",
+          "websockets>=10.0,<16.0",
+          "typing-extensions",
+          "toolz>=0.11.2,<0.12.0",
+        ],
+        REPO_ROOT,
+        onOutput,
+      );
+
+      onOutput("[setup] Python environment ready.\n\n");
+    })();
+
+    // Clear the singleton on failure so a retry can re-attempt
+    venvReady.catch(() => { venvReady = null; });
+  }
+
+  return venvReady;
+}
+
+// ── Price snapshot ────────────────────────────────────────────────────────────
 
 async function fetchPriceSnapshot(): Promise<PriceSnapshot | null> {
   try {
@@ -72,6 +229,8 @@ async function embedPricesInResult(variant: string, clientLabel: string, env: st
   }
 }
 
+// ── Request types ─────────────────────────────────────────────────────────────
+
 type Platform = "evm" | "solana";
 type Variant = "V1" | "V2" | "V3" | "V4" | "V5";
 type Client = "python" | "test-script" | "ts" | "dotnet";
@@ -97,6 +256,8 @@ interface RunRequest {
   kind: Kind;
   environment: string;
 }
+
+// ── POST /api/run ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   let body: RunRequest;
@@ -128,17 +289,11 @@ export async function POST(req: NextRequest) {
   }
   const env = environment;
 
-  // Map ts client to the correct label for the benchmark script.
-  // test-script uses "python" as the result-file client label (run_tests.py output convention).
   const clientLabel =
     client === "test-script" ? "python" :
     client === "ts" ? (platform === "solana" ? "ts-solana" : "ts") :
     client;
 
-  // Select script and args based on client type:
-  //   test-script -> benchmarks/run_tests.py (Python harness, all operations in-process)
-  //   python      -> benchmarks/run_client_benchmark.py --client python (clients/python/ subprocess)
-  //   ts/dotnet   -> benchmarks/run_client_benchmark.py or run_throughput_client.py
   const script =
     client === "test-script"
       ? "benchmarks/run_tests.py"
@@ -154,42 +309,48 @@ export async function POST(req: NextRequest) {
   const id = randomUUID();
   createRun(id, { variant, client, environment: env, kind });
 
-  const child = spawn(
-    PYTHON,
-    [script, ...args],
-    {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        VARIANT: variant,
-        CLIENT: clientLabel,
-        BENCHMARK_ENV: env,
-        PYTHONUNBUFFERED: "1",
-      },
-    }
-  );
-
-  child.stdout.on("data", (chunk: Buffer) => {
-    appendOutput(id, chunk.toString());
-  });
-
-  child.stderr.on("data", (chunk: Buffer) => {
-    appendOutput(id, chunk.toString());
-  });
-
-  child.on("close", (code: number | null) => {
-    if (code === 0) {
-      // Result files include a runtime timestamp in the name; the dashboard
-      // discovers them by scanning the results directory rather than by path.
-      embedPricesInResult(variant, clientLabel, env, kind).finally(() => completeRun(id));
-    } else {
+  // Bootstrap the venv in the background, then launch the benchmark.
+  // Output from the setup stage is prepended to the run's live log.
+  (async () => {
+    try {
+      await ensureVenv((chunk) => appendOutput(id, chunk));
+    } catch (err) {
+      appendOutput(id, `\n[setup error] ${err instanceof Error ? err.message : String(err)}\n`);
       failRun(id);
+      return;
     }
-  });
 
-  child.on("error", () => {
-    failRun(id);
-  });
+    // Resolve python after venv is guaranteed to exist
+    const python = resolvePython();
+
+    const child = spawn(
+      python,
+      [script, ...args],
+      {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          VARIANT: variant,
+          CLIENT: clientLabel,
+          BENCHMARK_ENV: env,
+          PYTHONUNBUFFERED: "1",
+        },
+      }
+    );
+
+    child.stdout.on("data", (chunk: Buffer) => appendOutput(id, chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => appendOutput(id, chunk.toString()));
+
+    child.on("close", (code: number | null) => {
+      if (code === 0) {
+        embedPricesInResult(variant, clientLabel, env, kind).finally(() => completeRun(id));
+      } else {
+        failRun(id);
+      }
+    });
+
+    child.on("error", () => failRun(id));
+  })();
 
   return NextResponse.json({ id, status: "running" }, { status: 202 });
 }

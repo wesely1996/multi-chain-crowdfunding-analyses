@@ -10,17 +10,18 @@ Platform detection:
   WSL/Linux → Solana variants only (V4, V5) on solana-localnet
 
 Usage:
-    python scripts/batch_run.py [--base-url URL] [--repeats N] [--kind KIND]
+    python scripts/batch_run.py [--base-url URL] [--repeats N]
                                 [--env EVM_ENV] [--solana-env SOLANA_ENV]
-                                [--clients c1,c2,...] [--dry-run]
+                                [--dry-run]
 
 Defaults:
     --base-url    http://localhost:3000
     --repeats     20
-    --kind        lifecycle
     --env         hardhat-localnet
     --solana-env  solana-localnet
-    --clients     python,test-script,ts,dotnet
+Clients python, ts, and dotnet are always run for every combination.
+
+Both 'lifecycle' and 'throughput' are always run for every combination.
 """
 
 import argparse
@@ -44,7 +45,7 @@ Kind    = Literal["lifecycle", "throughput"]
 
 EVM_VARIANTS: list[str]    = ["V1", "V2", "V3"]
 SOLANA_VARIANTS: list[str] = ["V4", "V5"]
-ALL_CLIENTS: list[str]     = ["python", "test-script", "ts", "dotnet"]
+ALL_CLIENTS: list[str]     = ["python", "ts", "dotnet"]
 
 POLL_INTERVAL_S  = 3.0
 SUBMIT_RETRY_MAX = 3
@@ -195,17 +196,12 @@ def parse_args() -> argparse.Namespace:
                    help="Dashboard base URL (default: http://localhost:3000)")
     p.add_argument("--repeats",     type=int, default=20,
                    help="Number of runs per combination (default: 20)")
-    p.add_argument("--kind",        default="lifecycle",
-                   choices=["lifecycle", "throughput"],
-                   help="Benchmark kind (default: lifecycle)")
     p.add_argument("--env",         default="hardhat-localnet",
                    choices=["hardhat-localnet", "sepolia"],
                    help="EVM environment (default: hardhat-localnet)")
     p.add_argument("--solana-env",  default="solana-localnet",
                    choices=["solana-localnet", "solana-devnet"],
                    help="Solana environment (default: solana-localnet)")
-    p.add_argument("--clients",     default=",".join(ALL_CLIENTS),
-                   help=f"Comma-separated client list (default: {','.join(ALL_CLIENTS)})")
     p.add_argument("--variants",    default=None,
                    help="Override variant list, e.g. V1,V3 (default: platform-appropriate)")
     p.add_argument("--dry-run",     action="store_true",
@@ -219,7 +215,7 @@ def main() -> None:
     args = parse_args()
 
     plat = args.force_platform or detect_platform()
-    clients  = [c.strip() for c in args.clients.split(",") if c.strip()]
+    clients  = ALL_CLIENTS
 
     if args.variants:
         variants = [v.strip() for v in args.variants.split(",") if v.strip()]
@@ -236,7 +232,8 @@ def main() -> None:
         variants = SOLANA_VARIANTS
         env_map  = {v: args.solana_env for v in variants}
 
-    combinations = [(v, c) for v in variants for c in clients]
+    kinds        = ["lifecycle", "throughput"]
+    combinations = [(v, c, k) for v in variants for c in clients for k in kinds]
     total_runs   = len(combinations) * args.repeats
 
     # ------------------------------------------------------------------
@@ -249,7 +246,7 @@ def main() -> None:
     print(f"  Base URL   : {args.base_url}")
     print(f"  Variants   : {variants}")
     print(f"  Clients    : {clients}")
-    print(f"  Kind       : {args.kind}")
+    print(f"  Kinds      : {kinds}")
     print(f"  Repeats    : {args.repeats}")
     print(f"  Total runs : {total_runs}")
     if args.dry_run:
@@ -263,9 +260,9 @@ def main() -> None:
     results: list[RunResult] = []
     run_num = 0
 
-    for variant, client in combinations:
+    for variant, client, kind in combinations:
         environment = env_map[variant]
-        combo_label = f"{variant}/{client}/{args.kind}/{environment}"
+        combo_label = f"{variant}/{client}/{kind}/{environment}"
         print(f"── Combo: {combo_label} ({args.repeats} runs)")
 
         combo_ok = combo_fail = 0
@@ -278,7 +275,7 @@ def main() -> None:
                 base_url=args.base_url,
                 variant=variant,
                 client=client,
-                kind=args.kind,
+                kind=kind,
                 environment=environment,
                 run_index=i,
                 dry_run=args.dry_run,
