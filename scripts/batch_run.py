@@ -133,7 +133,7 @@ def submit_run(base_url: str, variant: str, client: str, kind: str, environment:
     raise RuntimeError("unreachable")
 
 
-def poll_run(base_url: str, run_id: str, timeout_s: float = 600.0) -> tuple[str, str]:
+def poll_run(base_url: str, run_id: str, timeout_s: float = 1800.0) -> tuple[str, str]:
     """Poll /api/run/{id} until done. Returns (status, output_tail)."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:

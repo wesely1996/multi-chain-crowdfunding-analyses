@@ -32,8 +32,8 @@ async function main() {
 
   const vault = vaultPda(campaignAddr);
   const receiptMint = receiptMintPda(campaignAddr);
-  const contributorPaymentAta = getAssociatedTokenAddressSync(paymentMint, wallet.publicKey);
-  const contributorReceiptAta = getAssociatedTokenAddressSync(receiptMint, wallet.publicKey);
+  const contributorPaymentAta = getAssociatedTokenAddressSync(paymentMint, wallet.publicKey, false, tokenProgram);
+  const contributorReceiptAta = getAssociatedTokenAddressSync(receiptMint, wallet.publicKey, false, tokenProgram);
 
   const start = performance.now();
 

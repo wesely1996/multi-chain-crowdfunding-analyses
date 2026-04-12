@@ -44,7 +44,7 @@ export interface BenchmarkFile {
     schema_version: "2";
     variant: "V1" | "V2" | "V3" | "V4" | "V5";
     variant_label: string;
-    client: "python" | "ts" | "ts-solana" | "dotnet";
+    client: "python" | "ts" | "dotnet";
     client_label: string;
     environment:
         | "hardhat-localnet"

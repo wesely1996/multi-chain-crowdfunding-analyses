@@ -40,7 +40,7 @@ VARIANT: str = os.getenv("VARIANT", "V1")
 
 # CLIENT identifies the client library driving the benchmark.
 # Override with CLIENT env var.
-# python | ts | ts-evm | ts-solana | dotnet
+# python | ts | dotnet
 CLIENT: str = os.getenv("CLIENT", "python")
 
 # BENCHMARK_ENV overrides auto-detected environment label.
@@ -59,7 +59,6 @@ VARIANT_LABELS: dict[str, str] = {
 CLIENT_LABELS: dict[str, str] = {
     "python": "Python web3.py / anchorpy",
     "ts": "TypeScript viem / Anchor TS",
-    "ts-solana": "TypeScript Anchor TS",
     "dotnet": ".NET Nethereum / Solnet",
 }
 
@@ -178,10 +177,10 @@ DEADLINE_DAYS:  int = 30                          # Advance via evm_increaseTime
 # so campaigns with more contributors get proportionally more runway.
 FAST_DEADLINE_BASE_SECS: int = int(os.getenv("FAST_DEADLINE_BASE_SECS", "15"))
 # Per-contribution allowance: covers mint_to + contribute RPC + confirmation round-trip.
-FAST_DEADLINE_PER_CONTRIB_SECS: int = int(os.getenv("FAST_DEADLINE_PER_CONTRIB_SECS", "6"))
+FAST_DEADLINE_PER_CONTRIB_SECS: int = int(os.getenv("FAST_DEADLINE_PER_CONTRIB_SECS", "5"))
 # Extra buffer added after the deadline before calling finalize, to avoid
 # clock skew between the client and the validator.
-FAST_DEADLINE_BUFFER_SECS: int = int(os.getenv("FAST_DEADLINE_BUFFER_SECS", "2"))
+FAST_DEADLINE_BUFFER_SECS: int = int(os.getenv("FAST_DEADLINE_BUFFER_SECS", "5"))
 
 # Milestone schedule — must sum to 100
 MILESTONES: list[int] = [30, 30, 40]

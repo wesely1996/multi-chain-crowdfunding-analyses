@@ -22,7 +22,7 @@ const { values } = parseArgs({
 async function main() {
   const campaignAddr = resolveCampaign(values["campaign"], wallet.publicKey);
   const vault = vaultPda(campaignAddr);
-  const creatorPaymentAta = getAssociatedTokenAddressSync(paymentMint, wallet.publicKey);
+  const creatorPaymentAta = getAssociatedTokenAddressSync(paymentMint, wallet.publicKey, false, tokenProgram);
 
   const start = performance.now();
 

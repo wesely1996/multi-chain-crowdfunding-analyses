@@ -291,7 +291,6 @@ export async function POST(req: NextRequest) {
 
   const clientLabel =
     client === "test-script" ? "python" :
-    client === "ts" ? (platform === "solana" ? "ts-solana" : "ts") :
     client;
 
   const script =

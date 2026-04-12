@@ -210,7 +210,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
 
     ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
-    use_ts = client in ("ts", "ts-solana")
+    use_ts = client == "ts"
     use_python = client == "python"
 
     def _client_run_sync(operation: str, extra_args: list[str], env: dict) -> tuple[dict, int]:
@@ -257,7 +257,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
         payment_atas: list[Pubkey] = []
         skip_opts = TxOpts(skip_confirmation=False, skip_preflight=True)
         for i, c in enumerate(contributors):
-            ata = await payment_mint.create_account(c.pubkey())
+            ata = await payment_mint.create_associated_token_account(c.pubkey())
             await payment_mint.mint_to(ata, payer, config.CONTRIB_AMOUNT, opts=skip_opts)
             payment_atas.append(ata)
             if (i + 1) % 10 == 0:
@@ -288,7 +288,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
 
         receipt_spl = SPLAsyncToken(client_rpc, receipt_pda, TOKEN_PROGRAM_ID, payer)
         for c in contributors:
-            await receipt_spl.create_account(c.pubkey())
+            await receipt_spl.create_associated_token_account(c.pubkey())
         await asyncio.sleep(1)
 
         # Write keypairs to temp files

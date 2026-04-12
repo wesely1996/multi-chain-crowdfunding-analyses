@@ -1,7 +1,7 @@
 """
 run_client_benchmark.py — Full lifecycle benchmark via subprocess-driven TS or .NET clients.
 
-Drives npm run <op> (ts-evm/ts-solana) or dotnet run -- <op> (dotnet) as subprocesses,
+Drives npm run <op> (ts) or dotnet run -- <op> (dotnet) as subprocesses,
 parses their TxOutput JSON stdout, and assembles a canonical schema_version "2" result file.
 
 Usage
@@ -14,7 +14,7 @@ Usage
     python benchmarks/run_client_benchmark.py \
         --platform evm --client dotnet --variant V1 --env hardhat-localnet
 
-    # Solana — ts-solana client, V4, solana-localnet
+    # Solana — ts client, V4, solana-localnet
     python benchmarks/run_client_benchmark.py \
         --platform solana --client ts --variant V4 --env solana-localnet
 
@@ -516,7 +516,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
 
     ts_dir = str(config.REPO_ROOT / "clients" / "ts")
     dotnet_dir = str(config.REPO_ROOT / "clients" / "dotnet")
-    use_ts = client in ("ts", "ts-solana")
+    use_ts = client == "ts"
     use_python = client == "python"
 
     def _client_run_sync(operation: str, extra_args: list[str], env: dict) -> tuple[dict, int]:
@@ -582,7 +582,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         payment_atas: list[Pubkey] = []
         skip_opts = TxOpts(skip_confirmation=False, skip_preflight=True)
         for i, c in enumerate(contributors):
-            ata = await payment_mint.create_account(c.pubkey())
+            ata = await payment_mint.create_associated_token_account(c.pubkey())
             await payment_mint.mint_to(ata, payer, config.CONTRIB_AMOUNT, opts=skip_opts)
             payment_atas.append(ata)
             if (i + 1) % 10 == 0:
@@ -618,7 +618,7 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         # Pre-create receipt ATAs
         receipt_spl = SPLAsyncToken(client_rpc, receipt_mint_pda, token_prog, payer)
         for c in contributors:
-            await receipt_spl.create_account(c.pubkey())
+            await receipt_spl.create_associated_token_account(c.pubkey())
         await asyncio.sleep(1)
 
         # Write contributor keypairs to temp files for client use
@@ -693,14 +693,17 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         )
         await client_rpc.confirm_transaction(sig, commitment=Confirmed)
 
-        # One contribution to meet softCap
+        # Create creator payment ATA so withdraw can transfer funds to creator
+        await payment_mint.create_associated_token_account(creator_kp.pubkey())
+
+        # One contribution to meet softCap (must be >= SOFT_CAP, <= HARD_CAP)
         from spl.token.instructions import get_associated_token_address
         fc_c = contributors[0]
-        await payment_mint.mint_to(payment_atas[0], payer, config.CONTRIB_AMOUNT, opts=skip_opts)
+        await payment_mint.mint_to(payment_atas[0], payer, config.SOFT_CAP, opts=skip_opts)
         fc_receipt_ata = get_associated_token_address(fc_c.pubkey(), fc_receipt, token_prog)
         fc_contrib_record = _pda([b"contributor", bytes(fc_pda), bytes(fc_c.pubkey())])
         sig = await program.rpc["contribute"](
-            config.CONTRIB_AMOUNT,
+            config.SOFT_CAP,
             ctx=Context(
                 accounts={
                     "contributor": fc_c.pubkey(), "campaign": fc_pda,

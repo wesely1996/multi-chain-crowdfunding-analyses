@@ -708,7 +708,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         fc_pda       = _find_pda([b"campaign", bytes(creator_kp.pubkey()), fc_id_bytes])
         fc_vault_pda = _find_pda([b"vault",    bytes(fc_pda)])
         fc_receipt_pda = _find_pda([b"receipt_mint", bytes(fc_pda)])
-        fc_deadline  = int(_time.time()) + 5   # 5 seconds
+        fc_deadline  = int(_time.time()) + config.FAST_DEADLINE_BASE_SECS + 1 * config.FAST_DEADLINE_PER_CONTRIB_SECS
 
         fc_init_accounts = {
             "creator": creator_kp.pubkey(),
@@ -757,7 +757,8 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         await _send_and_confirm(sig)
 
         # Wait for deadline
-        await asyncio.sleep(6)
+        wait_secs = max(0, fc_deadline - int(_time.time()) + config.FAST_DEADLINE_BUFFER_SECS)
+        await asyncio.sleep(wait_secs)
 
         # ── finalize (TIMED) ───────────────────────────────────────────────────
         print("[solana] finalize()...")
@@ -823,7 +824,7 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
         ref_pda      = _find_pda([b"campaign", bytes(creator_kp.pubkey()), ref_id_bytes])
         ref_vault_pda = _find_pda([b"vault",   bytes(ref_pda)])
         ref_receipt_pda = _find_pda([b"receipt_mint", bytes(ref_pda)])
-        ref_deadline = int(_time.time()) + 5
+        ref_deadline = int(_time.time()) + config.FAST_DEADLINE_BASE_SECS + n_refund * config.FAST_DEADLINE_PER_CONTRIB_SECS
 
         ref_init_accounts = {
             "creator": creator_kp.pubkey(),
@@ -873,7 +874,8 @@ def run_solana(variant: str = config.VARIANT, client: str = config.CLIENT) -> di
             )
             await _send_and_confirm(sig)
 
-        await asyncio.sleep(6)  # wait for ref_deadline
+        wait_secs = max(0, ref_deadline - int(_time.time()) + config.FAST_DEADLINE_BUFFER_SECS)
+        await asyncio.sleep(wait_secs)  # wait for ref_deadline
 
         sig = await program.rpc["finalize"](
             ctx=Context(accounts={"caller": payer.pubkey(), "campaign": ref_pda}, options=no_confirm_opts)
