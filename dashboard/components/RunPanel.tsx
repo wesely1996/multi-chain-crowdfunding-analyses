@@ -261,7 +261,7 @@ export default function RunPanel({ onRunComplete }: Props) {
                 <div className="flex items-center gap-2 min-w-0">
                   <StatusBadge status={run.status} />
                   <span className="text-gray-300 font-mono truncate">
-                    {[VARIANT_LABELS[run.variant] ?? run.variant, run.client, run.environment, run.kind]
+                    {[(run.variant ? VARIANT_LABELS[run.variant] ?? run.variant : undefined), run.client, run.environment, run.kind]
                       .filter(Boolean)
                       .join(" · ")}
                   </span>

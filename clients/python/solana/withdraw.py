@@ -49,7 +49,7 @@ async def _withdraw(variant: str) -> TxOutput:
     payment_mint = Pubkey.from_string(payment_mint_str)
 
     vault_pda = find_pda([b"vault", bytes(campaign_pda)], program_id)
-    creator_payment_ata = get_associated_token_address(creator.pubkey(), payment_mint)
+    creator_payment_ata = get_associated_token_address(creator.pubkey(), payment_mint, token_program_id=token_prog)
 
     no_confirm_opts = TxOpts(skip_confirmation=True, skip_preflight=True)
 

@@ -27,11 +27,11 @@ npm start
 
 ## Pages
 
-| Route | Description |
-|-------|-------------|
-| `/` | Home: result cards grouped by (variant, client, environment). Click a card to drill into charts. |
-| `/benchmarks` | Full comparison view: ComparisonTable + GasChart + LatencyChart + ThroughputChart. |
-| `/run` | Full-page run form — equivalent to the sidebar run panel. |
+| Route         | Description                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------ |
+| `/`           | Home: result cards grouped by (variant, client, environment). Click a card to drill into charts. |
+| `/benchmarks` | Full comparison view: ComparisonTable + GasChart + LatencyChart + ThroughputChart.               |
+| `/run`        | Full-page run form — equivalent to the sidebar run panel.                                        |
 
 ## Features
 
@@ -46,12 +46,12 @@ npm start
 
 All routes require the Node.js runtime.
 
-| Route | Method | Description |
-|-------|--------|-------------|
-| `/api/benchmarks` | GET | Returns all loaded `BenchmarkFile[]` from `benchmarks/results/` |
-| `/api/run` | POST | Spawns the appropriate benchmark script as a subprocess; returns `{ id, status: "running" }` (HTTP 202) |
-| `/api/run/[id]` | GET | Returns status and stdout/stderr output for a run |
-| `/api/runs` | GET | Returns all run history entries sorted newest to oldest |
+| Route             | Method | Description                                                                                             |
+| ----------------- | ------ | ------------------------------------------------------------------------------------------------------- |
+| `/api/benchmarks` | GET    | Returns all loaded `BenchmarkFile[]` from `benchmarks/results/`                                         |
+| `/api/run`        | POST   | Spawns the appropriate benchmark script as a subprocess; returns `{ id, status: "running" }` (HTTP 202) |
+| `/api/run/[id]`   | GET    | Returns status and stdout/stderr output for a run                                                       |
+| `/api/runs`       | GET    | Returns all run history entries sorted newest to oldest                                                 |
 
 ### Run request body
 
@@ -65,12 +65,14 @@ All routes require the Node.js runtime.
 ```
 
 Valid values:
+
 - `variant`: V1–V5 (V1–V3 are EVM; V4–V5 are Solana)
 - `client`: `python` / `ts` / `dotnet`
 - `kind`: `lifecycle` / `throughput`
 - `environment`: `hardhat-localnet` / `sepolia` (EVM) | `solana-localnet` / `solana-devnet` (Solana)
 
 The API selects the script automatically:
+
 - `lifecycle` → `benchmarks/run_client_benchmark.py`
 - `throughput` → `benchmarks/run_throughput_client.py`
 
@@ -103,6 +105,7 @@ Minimum steps to collect results for every combination.
 ### One-time setup
 
 **Terminal A — EVM node (keep running):**
+
 ```powershell
 cd contracts/evm
 npm install
@@ -111,6 +114,7 @@ npx hardhat node
 ```
 
 **Python venv (from repo root, once):**
+
 ```powershell
 cd clients\python
 python -m venv .venv
@@ -125,6 +129,7 @@ python -m pip install "eth-abi>=4.0.0" "eth-account>=0.8.0,<0.13" "eth-typing>=3
 ```
 
 **Terminal B — Dashboard (keep running):**
+
 ```powershell
 cd dashboard
 npm install
@@ -132,6 +137,7 @@ npm run dev    # open http://localhost:3000/run
 ```
 
 **`.env` at repo root** — copy from `.env.example`, set at minimum:
+
 ```
 PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 RPC_URL=http://127.0.0.1:8545
@@ -143,12 +149,12 @@ RPC_URL=http://127.0.0.1:8545
 
 Select `hardhat-localnet` in the environment dropdown (default). The benchmark script auto-deploys contracts — no separate deploy step needed.
 
-| Variant | Client | Extra setup |
-|---------|--------|-------------|
-| V1 / V2 / V3 | test-script | None — fully self-contained |
-| V1 / V2 / V3 | python | venv active + `.env` with `PRIVATE_KEY` |
-| V1 / V2 / V3 | ts | `cd clients/ts && npm install` (once) |
-| V1 / V2 / V3 | dotnet | `cd clients/dotnet && dotnet build` (once) |
+| Variant      | Client      | Extra setup                                |
+| ------------ | ----------- | ------------------------------------------ |
+| V1 / V2 / V3 | test-script | None — fully self-contained                |
+| V1 / V2 / V3 | python      | venv active + `.env` with `PRIVATE_KEY`    |
+| V1 / V2 / V3 | ts          | `cd clients/ts && npm install` (once)      |
+| V1 / V2 / V3 | dotnet      | `cd clients/dotnet && dotnet build` (once) |
 
 Dashboard flow: select variant → client → kind → env=`hardhat-localnet` → **Start Run**.
 
@@ -159,12 +165,14 @@ Results appear under `/benchmarks` after the run completes.
 The dashboard disables Solana variants (V4, V5) when accessed from a Windows browser — the Python harness imports `anchorpy` unconditionally, which requires the Solana toolchain available only in WSL. To use the dashboard UI for Solana runs, start the Next.js server from WSL so the browser connects via a non-Windows user agent.
 
 **WSL Terminal A — validator (keep running):**
+
 ```bash
 # Run from WSL home (~), not from /mnt/c/...
 solana-test-validator --reset
 ```
 
 **WSL Terminal B — build and deploy programs (once per reset):**
+
 ```bash
 cd /mnt/c/<path-to-repo>/contracts/solana
 npm install
@@ -173,6 +181,7 @@ anchor deploy
 ```
 
 **WSL Terminal C — dashboard (keep running):**
+
 ```bash
 cd /mnt/c/<path-to-repo>/dashboard
 npm run dev    # open http://localhost:3000/run
@@ -181,6 +190,7 @@ npm run dev    # open http://localhost:3000/run
 Open `http://localhost:3000/run` in your browser, select **V4** or **V5**, choose `solana-localnet` or `solana-devnet`, pick a client and kind, then click **Start Run**. The Windows block is not triggered when the server runs under WSL.
 
 **Alternative — run benchmarks directly from WSL (no dashboard):**
+
 ```bash
 cd /mnt/c/<path-to-repo>
 source clients/python/.venv/bin/activate
@@ -192,11 +202,11 @@ Results land in `benchmarks/results/` and appear in the `/benchmarks` page after
 
 ### How each client is invoked
 
-| Client | Mechanism | What runs |
-|--------|-----------|-----------|
-| `test-script` | In-process Python | `run_tests.py` — direct web3.py calls |
-| `python` | Python subprocess | `clients/python/` scripts via `run_client_benchmark.py` |
-| `ts` | `npm run <op>` subprocess | `clients/ts/src/evm/*.ts` via tsx |
-| `dotnet` | `dotnet run -- <op>` subprocess | `clients/dotnet/` project |
+| Client        | Mechanism                       | What runs                                               |
+| ------------- | ------------------------------- | ------------------------------------------------------- |
+| `test-script` | In-process Python               | `run_tests.py` — direct web3.py calls                   |
+| `python`      | Python subprocess               | `clients/python/` scripts via `run_client_benchmark.py` |
+| `ts`          | `npm run <op>` subprocess       | `clients/ts/src/evm/*.ts` via tsx                       |
+| `dotnet`      | `dotnet run -- <op>` subprocess | `clients/dotnet/` project                               |
 
 `run_client_benchmark.py` injects `FACTORY_ADDRESS`, `CAMPAIGN_ADDRESS`, and `PAYMENT_TOKEN_ADDRESS` from the auto-deploy output into each subprocess environment — the ts and dotnet clients do not need those values pre-set in `.env`.

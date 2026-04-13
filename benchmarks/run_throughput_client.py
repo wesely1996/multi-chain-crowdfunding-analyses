@@ -222,14 +222,18 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
             return _run_dotnet(operation, extra_args, env, dotnet_dir, solana=True)
 
     async def _run() -> dict:
+        TOKEN_2022_PROGRAM_ID = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+        token_prog = TOKEN_2022_PROGRAM_ID if variant == "V5" else TOKEN_PROGRAM_ID
+
+        py_idl_path, program_id_str = config.SOLANA_VARIANT_ARTIFACTS[variant]
         with open(config.SOLANA_WALLET_PATH) as fh:
             payer = Keypair.from_bytes(bytes(json.load(fh)))
         client_rpc = AsyncClient(config.SOLANA_RPC_URL, commitment=Confirmed)
-        program_id = Pubkey.from_string(config.SOLANA_PROGRAM_ID)
+        program_id = Pubkey.from_string(program_id_str)
         wallet_obj = Wallet(payer)
         from anchorpy import Provider as AnchorProvider
         provider = AnchorProvider(client_rpc, wallet_obj)
-        with open(config.SOLANA_PY_IDL_PATH) as fh:
+        with open(py_idl_path) as fh:
             idl = Idl.from_json(fh.read())
         program = Program(idl, program_id, provider)
 
@@ -243,7 +247,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
         await asyncio.sleep(2)
 
         payment_mint = await SPLAsyncToken.create_mint(
-            client_rpc, payer, payer.pubkey(), 6, TOKEN_PROGRAM_ID
+            client_rpc, payer, payer.pubkey(), 6, token_prog
         )
         creator_kp = Keypair()
         contributors = [Keypair() for _ in range(config.N_CONTRIBUTIONS)]
@@ -278,7 +282,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
                 accounts={
                     "creator": creator_kp.pubkey(), "campaign": campaign_pda,
                     "payment_mint": payment_mint.pubkey, "vault": vault_pda,
-                    "receipt_mint": receipt_pda, "token_program": TOKEN_PROGRAM_ID,
+                    "receipt_mint": receipt_pda, "token_program": token_prog,
                     "system_program": SYSTEM_PROGRAM_ID, "rent": RENT,
                 },
                 signers=[creator_kp],
@@ -286,7 +290,7 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
         )
         await client_rpc.confirm_transaction(sig, commitment=Confirmed)
 
-        receipt_spl = SPLAsyncToken(client_rpc, receipt_pda, TOKEN_PROGRAM_ID, payer)
+        receipt_spl = SPLAsyncToken(client_rpc, receipt_pda, token_prog, payer)
         for c in contributors:
             await receipt_spl.create_associated_token_account(c.pubkey())
         await asyncio.sleep(1)
@@ -302,10 +306,11 @@ def throughput_solana_client(client: str, variant: str, env_name: str) -> dict:
         base_env = {
             **os.environ,
             "SOLANA_RPC_URL": config.SOLANA_RPC_URL,
-            f"SOLANA_PROGRAM_ID_{variant}": config.SOLANA_PROGRAM_ID,
+            f"SOLANA_PROGRAM_ID_{variant}": program_id_str,
             "SOLANA_PAYMENT_MINT": str(payment_mint.pubkey),
             "SOLANA_CAMPAIGN_ADDRESS": str(campaign_pda),
             "SOLANA_CAMPAIGN_ID": str(campaign_id_val),
+            "VARIANT": variant,
         }
 
         amount_str = str(config.CONTRIB_AMOUNT // (10 ** config.DECIMALS))

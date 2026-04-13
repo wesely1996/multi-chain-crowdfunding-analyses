@@ -52,8 +52,8 @@ async def _refund(variant: str) -> TxOutput:
     vault_pda = find_pda([b"vault", bytes(campaign_pda)], program_id)
     receipt_mint_pda = find_pda([b"receipt_mint", bytes(campaign_pda)], program_id)
     contrib_record_pda = find_pda([b"contributor", bytes(campaign_pda), bytes(contributor.pubkey())], program_id)
-    contributor_payment_ata = get_associated_token_address(contributor.pubkey(), payment_mint)
-    contributor_receipt_ata = get_associated_token_address(contributor.pubkey(), receipt_mint_pda)
+    contributor_payment_ata = get_associated_token_address(contributor.pubkey(), payment_mint, token_program_id=token_prog)
+    contributor_receipt_ata = get_associated_token_address(contributor.pubkey(), receipt_mint_pda, token_program_id=token_prog)
 
     no_confirm_opts = TxOpts(skip_confirmation=True, skip_preflight=True)
 

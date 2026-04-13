@@ -623,16 +623,23 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
 
         # Write contributor keypairs to temp files for client use
         contrib_keypair_files: list[str] = []
-        for c in contributors:
-            tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w")
-            json.dump(list(bytes(c)), tmp)
-            tmp.close()
-            contrib_keypair_files.append(tmp.name)
+        creator_tmp = None
+        try:
+            for c in contributors:
+                tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w")
+                json.dump(list(bytes(c)), tmp)
+                tmp.close()
+                contrib_keypair_files.append(tmp.name)
 
-        # Write creator keypair
-        creator_tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w")
-        json.dump(list(bytes(creator_kp)), creator_tmp)
-        creator_tmp.close()
+            # Write creator keypair
+            creator_tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w")
+            json.dump(list(bytes(creator_kp)), creator_tmp)
+            creator_tmp.close()
+        except Exception:
+            for f in contrib_keypair_files + ([creator_tmp.name] if creator_tmp else []):
+                try: os.unlink(f)
+                except Exception: pass
+            raise
 
         # Base env for Solana client
         base_env = {
@@ -733,7 +740,21 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
             "SOLANA_CAMPAIGN_ADDRESS": str(fc_pda),
             "SOLANA_KEYPAIR_PATH": config.SOLANA_WALLET_PATH,
         }
-        output, proc_ms = _client_run_sync("finalize", [], fc_env)
+        # Retry finalize in case the validator clock hasn't crossed fc_deadline yet.
+        # _run_subprocess raises SystemExit on failure, so we catch that here.
+        import time as _time_retry
+        output = proc_ms = None
+        for _fc_attempt in range(15):
+            try:
+                output, proc_ms = _client_run_sync("finalize", [], fc_env)
+                break
+            except SystemExit as _se:
+                msg = str(_se)
+                if ("6013" in msg or "Deadline has not yet passed" in msg) and _fc_attempt < 14:
+                    _time_retry.sleep(2)
+                else:
+                    raise
+        assert output is not None
         operations.append({
             "name": "finalize",
             "scenario": "success",
@@ -818,10 +839,18 @@ def run_solana_lifecycle(client: str, variant: str, env_name: str) -> dict:
         wait_secs = max(0, ref_deadline - int(_time2.time()) + config.FAST_DEADLINE_BUFFER_SECS)
         print(f"[{client}] Waiting {wait_secs}s for ref deadline...", flush=True)
         await asyncio.sleep(wait_secs)
-        sig = await program.rpc["finalize"](
-            ctx=Context(accounts={"caller": payer.pubkey(), "campaign": ref_pda})
-        )
-        await client_rpc.confirm_transaction(sig, commitment=Confirmed)
+        for _finalize_attempt in range(15):
+            try:
+                sig = await program.rpc["finalize"](
+                    ctx=Context(accounts={"caller": payer.pubkey(), "campaign": ref_pda})
+                )
+                await client_rpc.confirm_transaction(sig, commitment=Confirmed)
+                break
+            except Exception as _fe:
+                if ("6013" in str(_fe) or "Deadline has not yet passed" in str(_fe)) and _finalize_attempt < 14:
+                    await asyncio.sleep(2)
+                else:
+                    raise
 
         # Refund via client subprocess
         ref_env_base = {

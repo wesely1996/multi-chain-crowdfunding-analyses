@@ -58,17 +58,19 @@ export async function sendAndConfirmTx(
 ): Promise<string> {
   const tx = await builder.transaction();
   tx.feePayer = wallet.publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  tx.recentBlockhash = blockhash;
   tx.sign(wallet);
 
-  const simResult = await connection.simulateTransaction(tx);
-  if (simResult.value.err) {
-    const logs = simResult.value.logs?.join("\n") ?? "";
-    const anchorMsg = logs.match(/Error Message: (.+)/)?.[1] ?? JSON.stringify(simResult.value.err);
-    throw new Error(anchorMsg);
-  }
+  // Derive base58 signature from the signed transaction bytes
+  const txSig = anchor.utils.bytes.bs58.encode(tx.signature!);
 
-  const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
-  await connection.confirmTransaction(sig, "confirmed");
-  return sig;
+  try {
+    await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+  } catch (e: any) {
+    // AlreadyProcessed means this exact tx was already confirmed — treat as success
+    if (!String(e?.message ?? e).includes("AlreadyProcessed")) throw e;
+  }
+  await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, "confirmed");
+  return txSig;
 }
