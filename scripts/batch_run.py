@@ -143,7 +143,7 @@ def poll_run(base_url: str, run_id: str, timeout_s: float = 1800.0) -> tuple[str
             if status in ("success", "error"):
                 output = data.get("output", "")
                 return status, output[-400:] if len(output) > 400 else output
-        except urllib.error.URLError:
+        except (urllib.error.URLError, OSError):
             pass  # dashboard may be momentarily busy
         time.sleep(POLL_INTERVAL_S)
     return "timeout", ""
@@ -204,6 +204,8 @@ def parse_args() -> argparse.Namespace:
                    help="Solana environment (default: solana-localnet)")
     p.add_argument("--variants",    default=None,
                    help="Override variant list, e.g. V1,V3 (default: platform-appropriate)")
+    p.add_argument("--client",       default=None,
+                   help="Comma-separated client(s) to run, e.g. python,ts (default: all)")
     p.add_argument("--dry-run",     action="store_true",
                    help="Print what would be submitted without actually calling the API")
     p.add_argument("--force-platform", choices=["windows", "wsl", "linux"],
@@ -215,7 +217,15 @@ def main() -> None:
     args = parse_args()
 
     plat = args.force_platform or detect_platform()
-    clients  = ALL_CLIENTS
+
+    if args.client:
+        clients = [c.strip() for c in args.client.split(",") if c.strip()]
+        invalid = [c for c in clients if c not in ALL_CLIENTS]
+        if invalid:
+            print(f"Error: unknown client(s): {invalid}. Valid: {ALL_CLIENTS}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        clients = ALL_CLIENTS
 
     if args.variants:
         variants = [v.strip() for v in args.variants.split(",") if v.strip()]
