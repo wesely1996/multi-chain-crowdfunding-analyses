@@ -77,25 +77,72 @@ def _ops_by_prefix(operations: list[dict], prefix: str) -> list[dict]:
     return [o for o in operations if o["name"].startswith(prefix)]
 
 
-def _agg(values: list[int | float]) -> dict:
+def _agg(values: list[int | float], platform: str = "EVM") -> dict:
     if not values:
-        return {"avg": None, "min": None, "max": None, "stdev": None}
+        return {
+            "mean": None, "median": None, "q1": None, "q3": None, "iqr": None,
+            "stdev": None, "ci95_low": None, "ci95_high": None, "n": 0,
+            "min": None, "max": None,
+        }
+    n = len(values)
+    mean_val = statistics.mean(values)
+    stdev_val = statistics.stdev(values) if n > 1 else 0.0
+    median_val = statistics.median(values)
+    if n >= 2:
+        qs = statistics.quantiles(values, n=4)
+        q1_val, q3_val = qs[0], qs[2]
+    else:
+        q1_val = q3_val = float(values[0])
+    iqr_val = q3_val - q1_val
+
+    ci95_low: float = mean_val
+    ci95_high: float = mean_val
+    if n >= 2:
+        try:
+            if platform == "Solana":
+                import numpy as np
+                from scipy.stats import bootstrap as sp_bootstrap
+                res = sp_bootstrap(
+                    (list(values),), np.mean,
+                    n_resamples=10_000, confidence_level=0.95,
+                    method="BCa", random_state=42,
+                )
+                ci95_low = float(res.confidence_interval.low)
+                ci95_high = float(res.confidence_interval.high)
+            else:
+                from scipy.stats import t as sp_t
+                se = stdev_val / (n ** 0.5)
+                margin = float(sp_t.ppf(0.975, df=n - 1)) * se
+                ci95_low = mean_val - margin
+                ci95_high = mean_val + margin
+        except ImportError:
+            se = stdev_val / (n ** 0.5)
+            ci95_low = mean_val - 1.96 * se
+            ci95_high = mean_val + 1.96 * se
+
     return {
-        "avg": round(statistics.mean(values), 2),
+        "mean": round(mean_val, 2),
+        "median": round(median_val, 2),
+        "q1": round(q1_val, 2),
+        "q3": round(q3_val, 2),
+        "iqr": round(iqr_val, 2),
+        "stdev": round(stdev_val, 2),
+        "ci95_low": round(ci95_low, 2),
+        "ci95_high": round(ci95_high, 2),
+        "n": n,
         "min": min(values),
         "max": max(values),
-        "stdev": round(statistics.stdev(values), 2) if len(values) > 1 else 0.0,
     }
 
 
-def _cost_agg(ops: list[dict]) -> dict:
+def _cost_agg(ops: list[dict], platform: str = "EVM") -> dict:
     costs = [int(o["cost"]) for o in ops if o.get("cost") is not None]
-    return _agg(costs)
+    return _agg(costs, platform=platform)
 
 
-def _latency_agg(ops: list[dict]) -> dict:
+def _latency_agg(ops: list[dict], platform: str = "EVM") -> dict:
     lats = [int(o["latency_ms"]) for o in ops if o.get("latency_ms") is not None]
-    return _agg(lats)
+    return _agg(lats, platform=platform)
 
 
 def _fmt(val: Any, unit: str = "") -> str:
@@ -104,6 +151,25 @@ def _fmt(val: Any, unit: str = "") -> str:
     if isinstance(val, float):
         return f"{val:,.2f}{unit}"
     return f"{int(val):,}{unit}"
+
+
+def _fmt_stats(stats: dict, unit: str = "", decimals: int = 0) -> str:
+    """Format mean ± SE [IQR: q1–q3] for thesis tables."""
+    if stats["mean"] is None:
+        return "—"
+    mean = stats["mean"]
+    stdev = stats["stdev"] or 0.0
+    n = stats["n"] or 1
+    se = stdev / (n ** 0.5) if n > 0 else 0.0
+    q1 = stats["q1"]
+    q3 = stats["q3"]
+
+    def fv(v: float | None) -> str:
+        if v is None:
+            return "—"
+        return f"{v:,.{decimals}f}"
+
+    return f"{fv(mean)} ± {fv(se)} [IQR: {fv(q1)}–{fv(q3)}]{unit}"
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +266,10 @@ def _build_operation_rows(
         evm_ops = _ops_by_prefix(evm_data["operations"], evm_name) if evm_data else []
         sol_ops = _ops_by_prefix(sol_data["operations"], sol_name) if sol_data else []
 
-        evm_cost = _cost_agg(evm_ops)
-        evm_lat  = _latency_agg(evm_ops)
-        sol_cost = _cost_agg(sol_ops)
-        sol_lat  = _latency_agg(sol_ops)
+        evm_cost = _cost_agg(evm_ops, platform="EVM")
+        evm_lat  = _latency_agg(evm_ops, platform="EVM")
+        sol_cost = _cost_agg(sol_ops, platform="Solana")
+        sol_lat  = _latency_agg(sol_ops, platform="Solana")
 
         n_evm = len(evm_ops)
         label = evm_name if n_evm > 0 else sol_name
@@ -212,12 +278,12 @@ def _build_operation_rows(
 
         rows.append([
             label,
-            _fmt(evm_cost["avg"]),
+            _fmt(evm_cost["mean"]),
             f"{_fmt(evm_cost['min'])} / {_fmt(evm_cost['max'])}",
-            _fmt(evm_lat["avg"]),
-            _fmt(sol_cost["avg"]),
+            _fmt(evm_lat["mean"]),
+            _fmt(sol_cost["mean"]),
             f"{_fmt(sol_cost['min'])} / {_fmt(sol_cost['max'])}",
-            _fmt(sol_lat["avg"]),
+            _fmt(sol_lat["mean"]),
         ])
     return rows, headers
 
@@ -254,21 +320,174 @@ def _build_multi_client_rows(results: list[dict]) -> tuple[list[list], list[str]
         contrib_ops = _ops_by_prefix(r["operations"], "contribute")
         finalize_ops = _ops_by_prefix(r["operations"], "finalize")
 
-        contrib_cost = _cost_agg(contrib_ops)
-        contrib_lat = _latency_agg(contrib_ops)
-        fin_cost = _cost_agg(finalize_ops)
+        contrib_cost = _cost_agg(contrib_ops, platform=platform)
+        contrib_lat = _latency_agg(contrib_ops, platform=platform)
+        fin_cost = _cost_agg(finalize_ops, platform=platform)
         tps = r["throughput"].get("tps")
 
         rows.append([
             f"{variant} ({config.VARIANT_LABELS.get(variant, '')})",
             client,
             env,
-            f"{_fmt(contrib_cost['avg'])} {cost_unit}",
-            f"{_fmt(contrib_lat['avg'])} ms",
-            f"{_fmt(fin_cost['avg'])} {cost_unit}",
+            f"{_fmt(contrib_cost['mean'])} {cost_unit}",
+            f"{_fmt(contrib_lat['mean'])} ms",
+            f"{_fmt(fin_cost['mean'])} {cost_unit}",
             _fmt(tps),
         ])
     return rows, headers
+
+
+# ---------------------------------------------------------------------------
+# Thesis table builders (cross-file CI/IQR aggregation for Tabele 6.1/6.6/6.7)
+# ---------------------------------------------------------------------------
+
+def _collect_op_stats(
+    results: list[dict],
+    variant: str,
+    platform: str,
+    client: str | None,
+    op_prefix: str,
+    field: str,
+) -> dict:
+    """Aggregate per-file means across lifecycle files for (variant, platform, [client])."""
+    per_file: list[float] = []
+    for r in results:
+        if r.get("variant") != variant or r.get("platform") != platform:
+            continue
+        if client is not None:
+            r_client = r.get("client_label", r.get("client", ""))
+            if r_client != client:
+                continue
+        ops = _ops_by_prefix(r["operations"], op_prefix)
+        vals = [float(o[field]) for o in ops if o.get(field) is not None]
+        if vals:
+            per_file.append(statistics.mean(vals))
+    return _agg(per_file, platform=platform)
+
+
+def _collect_tps_stats(
+    tp_results: list[dict],
+    variant: str,
+    platform: str,
+    client: str | None,
+) -> dict:
+    """Aggregate TPS values across throughput files for (variant, platform, [client])."""
+    tps_list: list[float] = []
+    for r in tp_results:
+        if r.get("variant") != variant or r.get("platform") != platform:
+            continue
+        if client is not None:
+            r_client = r.get("client_label", r.get("client", ""))
+            if r_client != client:
+                continue
+        tps = r.get("throughput", {}).get("tps")
+        if tps is not None:
+            tps_list.append(float(tps))
+    return _agg(tps_list, platform=platform)
+
+
+_EVM_THESIS_OPS = [
+    ("contribute",          "Doprinos (contribute)"),
+    ("finalize",            "Finalizacija (finalize)"),
+    ("withdrawMilestone_0", "Isplata 0 (withdraw_0)"),
+    ("withdrawMilestone_1", "Isplata 1 (withdraw_1)"),
+    ("withdrawMilestone_2", "Isplata 2 (withdraw_2)"),
+    ("refund",              "Povraćaj (refund)"),
+]
+
+_SOL_THESIS_OPS = [
+    ("contribute", "Doprinos (contribute)"),
+    ("finalize",   "Finalizacija (finalize)"),
+    ("withdraw",   "Isplata (withdraw)"),
+    ("refund",     "Povraćaj (refund)"),
+]
+
+# Full client_label strings as stored in result JSON files
+_CLIENT_PYTHON = "Python web3.py / anchorpy"
+_CLIENT_TS     = "TypeScript viem / Anchor TS"
+_CLIENT_DOTNET = ".NET Nethereum / Solnet"
+
+
+def _build_thesis_61_rows(
+    results: list[dict], client: str = _CLIENT_PYTHON
+) -> tuple[list[list], list[str]]:
+    """Tabela 6.1 — EVM lifecycle gas costs: operations × V1/V2/V3."""
+    variants = ["V1", "V2", "V3"]
+    headers = ["Operacija"] + [f"{v} (gas)\nmean ± SE [IQR] (N)" for v in variants]
+    rows = []
+    for op_prefix, op_label in _EVM_THESIS_OPS:
+        row: list = [op_label]
+        for v in variants:
+            s = _collect_op_stats(results, v, "EVM", client, op_prefix, "cost")
+            row.append(_fmt_stats(s, decimals=0) + f" (N={s['n']})")
+        rows.append(row)
+    return rows, headers
+
+
+def _build_thesis_66_rows(
+    results: list[dict],
+) -> tuple[list[list], list[str]]:
+    """Tabela 6.6 — EVM throughput TPS from lifecycle files: clients × V1/V2/V3.
+
+    Uses lifecycle throughput.tps (50 sequential contributes within lifecycle run)
+    which matches the methodology used for the original thesis measurements.
+    """
+    variants = ["V1", "V2", "V3"]
+    clients = [
+        (_CLIENT_PYTHON, "Python"),
+        (_CLIENT_TS,     "TypeScript"),
+        (_CLIENT_DOTNET, ".NET"),
+    ]
+    headers = ["Klijent"] + [f"{v} (TPS)\nmean ± SE [IQR] (N)" for v in variants]
+    rows = []
+    for client_key, client_label in clients:
+        row: list = [client_label]
+        for v in variants:
+            s = _collect_tps_stats(results, v, "EVM", client_key)
+            row.append(_fmt_stats(s, decimals=2) + f" (N={s['n']})")
+        rows.append(row)
+    return rows, headers
+
+
+def _build_thesis_67_rows(
+    results: list[dict], client: str = _CLIENT_PYTHON
+) -> tuple[list[list], list[str]]:
+    """Tabela 6.7 — Solana lifecycle fees: operations × V4/V5."""
+    variants = ["V4", "V5"]
+    headers = ["Operacija"] + [f"{v} (lam)\nmean ± SE [IQR] (N)" for v in variants]
+    rows = []
+    for op_prefix, op_label in _SOL_THESIS_OPS:
+        row: list = [op_label]
+        for v in variants:
+            s = _collect_op_stats(results, v, "Solana", client, op_prefix, "cost")
+            row.append(_fmt_stats(s, decimals=0) + f" (N={s['n']})")
+        rows.append(row)
+    return rows, headers
+
+
+def print_thesis_tables(
+    results: list[dict],
+    tp_results: list[dict],
+    fmt: str = "github",
+) -> None:
+    """Print Tabele 6.1, 6.6, 6.7 with cross-file CI/IQR statistics."""
+    print("\n" + "=" * 100)
+    print(f"TABELA 6.1 — EVM lifecycle gas costs (V1/V2/V3, klijent: {_CLIENT_PYTHON}, cross-file N runs)")
+    print("=" * 100)
+    rows, headers = _build_thesis_61_rows(results)
+    print(_render(rows, headers, fmt, caption="Tabela 6.1 — EVM troškovi životnog ciklusa"))
+
+    print("\n" + "=" * 100)
+    print("TABELA 6.6 — Throughput TPS (EVM V1/V2/V3 × klijenti, cross-file N runs)")
+    print("=" * 100)
+    rows, headers = _build_thesis_66_rows(results)
+    print(_render(rows, headers, fmt, caption="Tabela 6.6 — Propusnost po varijanti i klijentu"))
+
+    print("\n" + "=" * 100)
+    print(f"TABELA 6.7 — Solana lifecycle fees (V4/V5, klijent: {_CLIENT_PYTHON}, cross-file N runs)")
+    print("=" * 100)
+    rows, headers = _build_thesis_67_rows(results)
+    print(_render(rows, headers, fmt, caption="Tabela 6.7 — Solana troškovi životnog ciklusa"))
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +685,11 @@ def main() -> None:
     # Legacy two-file args (backward compat)
     parser.add_argument("--evm",    default=None, help="Path to EVM raw JSON (legacy)")
     parser.add_argument("--solana", default=None, help="Path to Solana raw JSON (legacy)")
+    parser.add_argument(
+        "--thesis",
+        action="store_true",
+        help="Print Tabele 6.1/6.6/6.7 with cross-file CI/IQR statistics (for thesis)",
+    )
     args = parser.parse_args()
 
     out_path = pathlib.Path(args.output) if args.output else None
@@ -476,6 +700,16 @@ def main() -> None:
         sol_path = pathlib.Path(args.solana) if args.solana else config.SOLANA_RAW_RESULTS
         evm_data, sol_data = load_results(evm_path, sol_path)
         print_comparison(evm_data, sol_data, fmt=args.format)
+        return
+
+    # Thesis mode: cross-file statistics for Tabele 6.1/6.6/6.7
+    if args.thesis:
+        results_dir = pathlib.Path(args.results_dir)
+        if not results_dir.exists():
+            sys.exit(f"[error] Results directory not found: {results_dir}. Run benchmarks first.")
+        results = load_all_results(results_dir)
+        tp_results = load_throughput_results(results_dir)
+        print_thesis_tables(results, tp_results, fmt=args.format)
         return
 
     # Multi-file mode: scan results directory

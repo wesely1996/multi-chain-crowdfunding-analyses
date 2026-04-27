@@ -29,6 +29,10 @@ anchorpy==0.21.0          # pinned with solana/solders; use a Python-validated I
 # Output formatting
 tabulate==0.9.0
 
+# Statistical analysis (CI, bootstrap, significance tests) — A2
+scipy>=1.11
+numpy>=1.26
+
 # ── Version overrides (anchorpy/solana compat) ────────────────────────────
 websockets>=10.0,<11.0    # anchorpy <11.0, solana <12.0
 toolz>=0.11.2,<0.12.0     # anchorpy <0.12.0
